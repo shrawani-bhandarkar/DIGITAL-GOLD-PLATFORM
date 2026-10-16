@@ -1,0 +1,25 @@
+{
+  "name": "digi-gold",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/mobile",
+    "apps/api"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:web": "npm run dev --workspace @digi-gold/web",
+    "dev:api": "npm run dev --workspace @digi-gold/api",
+    "dev:mobile": "npm run start --workspace @digi-gold/mobile",
+    "build": "npm run build --workspace @digi-gold/api && npm run build --workspace @digi-gold/web",
+    "typecheck": "npm run typecheck --workspace @digi-gold/api && npm run typecheck --workspace @digi-gold/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+
