@@ -1,9 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/+$/, '');
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/+$/, '') ?? '';
 
 export async function apiRequest(path, options = {}) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured. The app is currently using demo data.');
-  }
   if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || path.includes('\\') || /[\u0000-\u001f]/.test(path)) {
     throw new Error('API paths must be same-origin paths beginning with one slash.');
   }
@@ -20,11 +17,24 @@ export async function apiRequest(path, options = {}) {
   if (hasBody && !isBinaryBody && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...requestOptions,
+    credentials: requestOptions.credentials ?? 'include',
     body: requestBody,
     headers,
   });
 
   if (!response.ok) {
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json') || contentType.includes('+json')) {
+      let payload;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+      if (typeof payload?.message === 'string' && payload.message.trim()) {
+        throw new Error(payload.message);
+      }
+    }
     throw new Error(`API request failed (${response.status})${response.statusText ? `: ${response.statusText}` : ''}`);
   }
 

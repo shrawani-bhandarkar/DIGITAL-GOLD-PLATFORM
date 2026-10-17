@@ -1,47 +1,62 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { apiRequest } from '../services/apiClient.js';
 
 const AuthContext = createContext(null);
-const STORAGE_KEY = 'digital-gold-demo-session';
-const DEMO_EMAIL = 'admin@digitalgold.demo';
-const DEMO_PASSWORD = 'GoldAdmin123!';
-
-function readSession() {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === 'authenticated';
-  } catch {
-    return false;
-  }
-}
 
 export function AuthProvider({ children }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(readSession);
+  const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
 
-  function login(email, password) {
-    if (email.trim().toLowerCase() !== DEMO_EMAIL || password !== DEMO_PASSWORD) {
-      return { success: false, message: 'Email or password is incorrect.' };
-    }
+  useEffect(() => {
+    let active = true;
+    apiRequest('/api/auth/session')
+      .then((session) => {
+        if (active) setUser(session.user ?? null);
+      })
+      .catch((error) => {
+        if (active) setAuthError(error.message || 'Could not verify your session with the server.');
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
 
-    try {
-      window.localStorage.setItem(STORAGE_KEY, 'authenticated');
-    } catch {
-      return { success: false, message: 'Could not save the demo session in this browser.' };
-    }
-    setIsAuthenticated(true);
-    return { success: true };
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function login(email, password) {
+    setAuthError('');
+    const result = await apiRequest('/api/auth/login', {
+      method: 'POST',
+      body: { email, password },
+    });
+    if (!result?.user) throw new Error('The server returned an invalid sign-in response.');
+    setUser(result.user);
+    setAuthError('');
   }
 
-  function logout() {
+  async function logout() {
+    setUser(null);
     try {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // The in-memory session is still cleared if browser storage is unavailable.
+      await apiRequest('/api/auth/logout', { method: 'POST' });
+      setAuthError('');
+    } catch (error) {
+      setAuthError(`Could not complete sign out with the server: ${error.message}`);
     }
-    setIsAuthenticated(false);
   }
 
   const value = useMemo(
-    () => ({ isAuthenticated, login, logout }),
-    [isAuthenticated],
+    () => ({
+      isAuthenticated: Boolean(user),
+      isLoading,
+      authError,
+      user,
+      login,
+      logout,
+    }),
+    [user, isLoading, authError],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

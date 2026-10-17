@@ -11,22 +11,27 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [touched, setTouched] = useState({});
-  const { login } = useAuth();
+  const { login, authError } = useAuth();
   const navigate = useNavigate();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const emailError = touched.email && (!email.trim() ? 'Email is required.' : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? 'Enter a valid email address.' : '');
   const passwordError = touched.password && !password ? 'Password is required.' : '';
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
     setTouched({ email: true, password: true });
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password) return;
-    const result = login(email, password);
-    if (!result.success) {
-      setError(result.message);
-      return;
+    setIsSubmitting(true);
+    setError('');
+    try {
+      await login(email, password);
+      navigate('/', { replace: true });
+    } catch (loginError) {
+      setError(loginError.message || 'Sign in failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-    navigate('/', { replace: true });
   }
 
   return (
@@ -56,7 +61,7 @@ export default function LoginPage() {
             <p>Sign in to your administration workspace.</p>
           </div>
 
-          <div className="demo-banner"><span className="demo-banner-icon"><ShieldCheck size={17} /></span><div><strong>Demo access</strong><span>Use the credentials below to explore the dashboard.</span></div></div>
+          <div className="demo-banner"><span className="demo-banner-icon"><ShieldCheck size={17} /></span><div><strong>Administrator sign-in</strong><span>Use the administrator account provisioned for your platform.</span></div></div>
           <form className="login-form" onSubmit={submit} noValidate>
             <label className="form-label" htmlFor="email">Email address</label>
             <div className={`input-wrap ${emailError ? 'input-error' : ''}`}>
@@ -69,11 +74,10 @@ export default function LoginPage() {
               <button type="button" className="password-toggle" onClick={() => setShowPassword((shown) => !shown)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button>
             </div>
             {passwordError && <span className="field-error" id="password-error">{passwordError}</span>}
-            {error && <div className="login-error" role="alert">{error}</div>}
-            <button className="button button-login" type="submit">Sign in to workspace <ArrowRight size={17} /></button>
+            {(error || authError) && <div className="login-error" role="alert">{error || authError}</div>}
+            <button className="button button-login" type="submit" disabled={isSubmitting}>{isSubmitting ? 'Signing in…' : 'Sign in to workspace'} {!isSubmitting && <ArrowRight size={17} />}</button>
           </form>
-          <div className="demo-credentials"><span>DEMO CREDENTIALS</span><code>admin@digitalgold.demo</code><code>GoldAdmin123!</code></div>
-          <p className="login-security-note"><LockKeyhole size={13} /> Demo authentication is for preview only — not production security.</p>
+          <p className="login-security-note"><LockKeyhole size={13} /> Access is verified by the platform server.</p>
         </div>
         <div className="login-copyright">© 2026 Digital Gold Platform <span>·</span> Admin Console</div>
       </section>

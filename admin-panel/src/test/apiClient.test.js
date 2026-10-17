@@ -8,10 +8,18 @@ describe('apiRequest preparation', () => {
     vi.resetModules();
   });
 
-  it('rejects requests until the API base URL is configured', async () => {
+  it('uses same-origin API paths when no base URL is configured', async () => {
     vi.stubEnv('VITE_API_BASE_URL', '');
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
     const { apiRequest } = await import('../services/apiClient.js');
-    await expect(apiRequest('/customers')).rejects.toThrow('API base URL is not configured');
+    await expect(apiRequest('/api/auth/session')).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/session', expect.objectContaining({
+      credentials: 'include',
+    }));
   });
 
   it('sends JSON and parses successful responses without embedding an endpoint in the UI', async () => {
@@ -29,6 +37,7 @@ describe('apiRequest preparation', () => {
     }));
     expect(fetchMock.mock.calls[0][1].headers.get('content-type')).toBe('application/json');
     expect(fetchMock.mock.calls[0][1].headers.get('accept')).toBe('application/json');
+    expect(fetchMock.mock.calls[0][1].credentials).toBe('include');
   });
 
   it('rejects unsafe paths and reports HTTP failures explicitly', async () => {
@@ -39,5 +48,17 @@ describe('apiRequest preparation', () => {
     await expect(apiRequest('//other.example')).rejects.toThrow('same-origin paths');
     await expect(apiRequest('/health')).rejects.toThrow('API request failed (503): Unavailable');
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces API-provided authentication errors', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '');
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"message":"Email or password is incorrect."}', {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { apiRequest } = await import('../services/apiClient.js');
+    await expect(apiRequest('/api/auth/login', { method: 'POST', body: { email: 'bad@example.com', password: 'bad' } }))
+      .rejects.toThrow('Email or password is incorrect.');
   });
 });

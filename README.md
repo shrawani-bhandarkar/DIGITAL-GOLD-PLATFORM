@@ -47,6 +47,23 @@ mysql -u root -p digital_gold_db < C:\Users\ASUS\Downloads\Dump20261015.sql
 
 Set `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` in `apps/api/.env` to match your MySQL account. The API checks the MySQL connection before it starts; `/api/health/db` reports database readiness. The dump contains table definitions only, not application records.
 
+### Admin panel sign-in
+
+The standalone admin panel uses database-backed authentication. Create its account/session tables and provision an administrator once:
+
+```cmd
+mysql -u root -p digital_gold_db < apps\api\src\modules\auth\schema.sql
+set ADMIN_EMAIL=you@example.com
+set ADMIN_DISPLAY_NAME=Your Name
+set ADMIN_PASSWORD=use-a-unique-password-at-least-12-characters
+npm run create:admin --workspace @digi-gold/api
+set ADMIN_EMAIL=
+set ADMIN_DISPLAY_NAME=
+set ADMIN_PASSWORD=
+```
+
+Start the API with `npm run dev:api` and the standalone panel with `npm run dev --prefix admin-panel`. Sign in using the email and password you provisioned; there are no default demo credentials. The panel uses a same-origin development proxy to reach the API.
+
 ## Useful commands
 
 ```bash
@@ -59,6 +76,6 @@ npm run dev:mobile
 
 ## Scope and implementation status
 
-This is a structural scaffold with starter entry points and database connectivity—not a functioning financial product. Authentication, KYC, persistence-backed API operations, provider integrations, order processing, ledger, payments, reconciliation, and the screens/actions listed in the planning docs still need implementation and testing. Provider choices and business policies are intentionally left open; see [docs/decisions-required.md](./docs/decisions-required.md). No image assets are included.
+This is a structural scaffold with starter entry points and database connectivity—not a functioning financial product. Admin-panel sign-in and server sessions are database-backed; customer authentication, server-side authorization for operational actions, KYC, persistence-backed API operations, provider integrations, order processing, ledger, payments, reconciliation, and the screens/actions listed in the planning docs still need implementation and testing. Provider choices and business policies are intentionally left open; see [docs/decisions-required.md](./docs/decisions-required.md). No image assets are included.
 
 Review [docs/architecture.md](./docs/architecture.md), [docs/workflows.md](./docs/workflows.md), [docs/data-model.md](./docs/data-model.md), and [docs/security-and-operations.md](./docs/security-and-operations.md) before implementation.

@@ -1,4 +1,4 @@
-// Runtime validation coverage for routed admin behavior and demo-only state.
+// Runtime validation coverage for routed admin behavior and backend authentication.
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,16 +6,51 @@ import { MemoryRouter } from 'react-router-dom';
 import App from '../App.jsx';
 import { AuthProvider } from '../context/AuthContext.jsx';
 
-const STORAGE_KEY = 'digital-gold-demo-session';
+const ADMIN_USER = {
+  email: 'admin@example.test',
+  displayName: 'Test Administrator',
+  role: 'admin',
+};
+let sessionUser;
 
-function renderApp(path = '/') {
-  return render(
+async function renderApp(path = '/') {
+  const view = render(
     <MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <App />
       </AuthProvider>
     </MemoryRouter>,
   );
+  const headings = {
+    '/': 'Good morning, Admin',
+    '/login': 'Welcome back',
+    '/customers': 'Customers',
+    '/products': 'Metal products',
+    '/rates': 'Rate management',
+    '/orders': 'Buy & sell orders',
+    '/sips': 'SIP management',
+    '/redemptions': 'Redemption & delivery',
+    '/gifts': 'Gift management',
+    '/payments': 'Payments',
+    '/refunds': 'Refund requests',
+    '/reconciliation': 'Reconciliation',
+    '/reports': 'Reports',
+    '/roles': 'Roles & permissions',
+    '/settings': 'Settings',
+    '/audit-logs': 'Audit logs',
+    '/customers/CUS-10482': 'Aarav Mehta',
+    '/customers/CUS-10481': 'Rohan Gupta',
+    '/orders/ORD-2026-08421': 'Buy Gold',
+  };
+  if (path === '/customers/CUS-10481') {
+    await screen.findByText('Estimated portfolio value · demo');
+  } else {
+    await screen.findByRole('heading', {
+      name: headings[path],
+      ...(path === '/login' ? {} : { level: 1 }),
+    });
+  }
+  return view;
 }
 
 async function goTo(path) {
@@ -25,12 +60,39 @@ async function goTo(path) {
 }
 
 beforeEach(() => {
-  window.localStorage.setItem(STORAGE_KEY, 'authenticated');
+  sessionUser = ADMIN_USER;
+  vi.stubGlobal('fetch', vi.fn(async (input, options = {}) => {
+    const path = String(input);
+    if (path.endsWith('/api/auth/session')) {
+      return new Response(JSON.stringify({ user: sessionUser }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (path.endsWith('/api/auth/login')) {
+      const credentials = JSON.parse(options.body);
+      if (credentials.email === 'admin@example.test' && credentials.password === 'ServerPassword123!') {
+        sessionUser = ADMIN_USER;
+        return new Response(JSON.stringify({ user: ADMIN_USER }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{"message":"Email or password is incorrect."}', {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (path.endsWith('/api/auth/logout')) {
+      sessionUser = null;
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unexpected API request: ${path}`);
+  }));
 });
 
 afterEach(() => {
   cleanup();
-  window.localStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -54,13 +116,13 @@ describe('routing, authentication, and dashboard', () => {
     ['/audit-logs', 'Audit logs'],
     ['/customers/CUS-10482', 'Aarav Mehta'],
     ['/orders/ORD-2026-08421', 'Buy Gold'],
-  ])('renders %s', (path, heading) => {
-    renderApp(path);
+  ])('renders %s', async (path, heading) => {
+    await renderApp(path);
     expect(screen.getByRole('heading', { name: heading, level: 1 })).toBeInTheDocument();
   });
 
-  it('renders dashboard sample metrics and indicative rates', () => {
-    renderApp('/');
+  it('renders dashboard sample metrics and indicative rates', async () => {
+    await renderApp('/');
     expect(screen.getByLabelText('Platform metrics')).toBeInTheDocument();
     expect(screen.getByLabelText('Indicative metal rates')).toBeInTheDocument();
     expect(screen.getByText('All rates, customer figures, and financial amounts on this dashboard are sample values for preview only.')).toBeInTheDocument();
@@ -73,24 +135,28 @@ describe('routing, authentication, and dashboard', () => {
     expect(rateCards.getByText('₹3,120')).toBeInTheDocument();
   });
 
-  it('rejects invalid credentials and accepts demo credentials', async () => {
-    window.localStorage.clear();
+  it('submits credentials to the backend and accepts its authenticated session', async () => {
+    sessionUser = null;
     const user = userEvent.setup();
-    renderApp('/login');
-    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'admin@digitalgold.demo');
+    await renderApp('/login');
+    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'admin@example.test');
     await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'incorrect');
     await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
     expect(screen.getByRole('alert')).toHaveTextContent('Email or password is incorrect.');
 
     await user.clear(screen.getByLabelText('Password', { selector: 'input' }));
-    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'GoldAdmin123!');
+    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'ServerPassword123!');
     await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
     expect(await screen.findByRole('heading', { name: 'Good morning, Admin' })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('/api/auth/login', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ email: 'admin@example.test', password: 'ServerPassword123!' }),
+    }));
   });
 
   it('navigates by sidebar and protects routes after logout', async () => {
     const user = userEvent.setup();
-    renderApp('/');
+    await renderApp('/');
     await goTo('/reports');
     expect(screen.getByRole('heading', { name: 'Reports' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
@@ -101,7 +167,7 @@ describe('routing, authentication, and dashboard', () => {
 describe('management lists and forms', () => {
   it('sorts filtered table data before paginating and reverses sort direction', async () => {
     const user = userEvent.setup();
-    renderApp('/customers');
+    await renderApp('/customers');
     await user.click(screen.getByRole('button', { name: 'Sort by Customer' }));
     expect(screen.getAllByRole('row')[1]).toHaveTextContent('Aarav Mehta');
     await user.click(screen.getByRole('button', { name: 'Next page' }));
@@ -113,7 +179,7 @@ describe('management lists and forms', () => {
 
   it('searches, filters, paginates, validates, and creates a customer', async () => {
     const user = userEvent.setup();
-    renderApp('/customers');
+    await renderApp('/customers');
     expect(screen.getByRole('button', { name: 'Sort by Estimated value · demo' })).toBeInTheDocument();
     await user.type(screen.getByRole('textbox', { name: 'Search customers' }), 'no matching customer');
     expect(screen.getByText('No records to display.')).toBeInTheDocument();
@@ -141,7 +207,7 @@ describe('management lists and forms', () => {
 
   it('confirms KYC decisions and account suspension/restore as demo-only actions', async () => {
     const user = userEvent.setup();
-    renderApp('/customers/CUS-10482');
+    await renderApp('/customers/CUS-10482');
     await user.click(screen.getByRole('button', { name: 'Reject verification' }));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Reject verification' }));
     expect(screen.getByText('Identity verification is rejected.')).toBeInTheDocument();
@@ -159,8 +225,8 @@ describe('management lists and forms', () => {
     expect(screen.getByText('Identity verification is verified.')).toBeInTheDocument();
   });
 
-  it('shows customer holdings from ledger quantities with explicitly estimated demo valuation', () => {
-    renderApp('/customers/CUS-10481');
+  it('shows customer holdings from ledger quantities with explicitly estimated demo valuation', async () => {
+    await renderApp('/customers/CUS-10481');
     expect(screen.getByText('Estimated portfolio value · demo')).toBeInTheDocument();
     expect(screen.getByText(/1.360 g available · 0.640 g reserved/)).toBeInTheDocument();
     expect(screen.getByText(/estimated demo valuations at displayed sell rates/)).toBeInTheDocument();
@@ -168,7 +234,7 @@ describe('management lists and forms', () => {
 
   it('validates, creates, edits, and confirms product status changes', async () => {
     const user = userEvent.setup();
-    renderApp('/products');
+    await renderApp('/products');
     expect(screen.getByRole('row', { name: /Platinum/ })).toHaveTextContent('Platinum');
     await user.click(screen.getByRole('button', { name: 'Add product' }));
     const dialog = screen.getByRole('dialog');
@@ -212,7 +278,7 @@ describe('management lists and forms', () => {
 
   it('creates and approves a rate request; supports confirmed rejection', async () => {
     const user = userEvent.setup();
-    renderApp('/rates');
+    await renderApp('/rates');
     const currentRates = screen.getByRole('heading', { name: 'Current sample rates and rules' }).closest('section');
     expect(within(currentRates).getByRole('row', { name: /Platinum/ })).toHaveTextContent('₹3,120');
     await user.click(screen.getByRole('button', { name: 'Request rate change' }));
@@ -245,7 +311,7 @@ describe('management lists and forms', () => {
 describe('operational workflows', () => {
   it('uses the Platinum product rate and its own configured fee policy in buy estimates', async () => {
     const user = userEvent.setup();
-    renderApp('/products');
+    await renderApp('/products');
     const platinumRow = screen.getByRole('row', { name: /Platinum/ });
     await user.click(within(platinumRow).getByRole('button', { name: 'Edit Platinum' }));
     const editDialog = screen.getByRole('dialog');
@@ -275,7 +341,7 @@ describe('operational workflows', () => {
 
   it('creates a simulated buy order and advances its status only after confirmation', async () => {
     const user = userEvent.setup();
-    renderApp('/orders');
+    await renderApp('/orders');
     await user.click(screen.getByRole('button', { name: 'New buy' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: 'Create demo order' }).closest('form')).not.toBeValid();
@@ -299,7 +365,7 @@ describe('operational workflows', () => {
 
   it('creates a simulated sell order through the same validated order form', async () => {
     const user = userEvent.setup();
-    renderApp('/orders');
+    await renderApp('/orders');
     await user.click(screen.getByRole('button', { name: 'New sell' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Create simulated sell order');
     const form = screen.getByRole('dialog').querySelector('form');
@@ -317,7 +383,7 @@ describe('operational workflows', () => {
 
   it('previews quantity-based buy charges and records its calculated quantity', async () => {
     const user = userEvent.setup();
-    renderApp('/orders');
+    await renderApp('/orders');
     await user.click(screen.getByRole('button', { name: 'New buy' }));
     const form = screen.getByRole('dialog').querySelector('form');
     await user.selectOptions(within(form).getByLabelText('Customer'), 'CUS-10482');
@@ -337,7 +403,7 @@ describe('operational workflows', () => {
 
   it('creates a SIP and confirms pause/resume row actions', async () => {
     const user = userEvent.setup();
-    renderApp('/sips');
+    await renderApp('/sips');
     await user.click(screen.getByRole('button', { name: 'Create SIP' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: 'Create demo SIP' }).closest('form')).not.toBeValid();
@@ -367,7 +433,7 @@ describe('operational workflows', () => {
 
   it('creates a coin redemption and supports confirmation and details actions', async () => {
     const user = userEvent.setup();
-    renderApp('/redemptions');
+    await renderApp('/redemptions');
     await user.click(screen.getByRole('button', { name: 'Create redemption' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: 'Create demo request' }).closest('form')).not.toBeValid();
@@ -406,7 +472,7 @@ describe('operational workflows', () => {
 
   it('creates and cancels a scheduled gift; resend remains simulated', async () => {
     const user = userEvent.setup();
-    renderApp('/gifts');
+    await renderApp('/gifts');
     await user.click(screen.getByRole('button', { name: 'Create gift' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: 'Create demo gift' }).closest('form')).not.toBeValid();
@@ -435,7 +501,7 @@ describe('operational workflows', () => {
 
   it('keeps payments read-only while exposing payment details', async () => {
     const user = userEvent.setup();
-    renderApp('/payments');
+    await renderApp('/payments');
     expect(screen.queryByRole('button', { name: /Create|New payment/i })).not.toBeInTheDocument();
     await user.click(screen.getAllByRole('button', { name: /PAY-2026-/ })[0]);
     expect(screen.getByRole('dialog')).toHaveTextContent('Read-only demo record');
@@ -444,7 +510,7 @@ describe('operational workflows', () => {
 
   it('records refund decisions only after confirmation and settlement review as annotation', async () => {
     const user = userEvent.setup();
-    renderApp('/refunds');
+    await renderApp('/refunds');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Filter refund status' }), 'Pending review');
     const pendingRow = screen.getAllByRole('row').find((row) => row.textContent.includes('Pending review'));
     await user.click(within(pendingRow).getByRole('button', { name: 'Approve request' }));
@@ -478,7 +544,7 @@ describe('operational workflows', () => {
 describe('administration demo behavior and reports', () => {
   it('saves settings for the mounted session, logs changes, and resets after remount', async () => {
     const user = userEvent.setup();
-    const view = renderApp('/settings');
+    const view = await renderApp('/settings');
     await user.clear(screen.getByLabelText('Organization name'));
     await user.type(screen.getByLabelText('Organization name'), 'Test Demo Org');
     await user.clear(screen.getByLabelText('Support email'));
@@ -498,13 +564,13 @@ describe('administration demo behavior and reports', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Reset settings' }));
     expect(screen.getByLabelText('Organization name')).toHaveValue('Digital Gold Platform');
     view.unmount();
-    renderApp('/settings');
+    await renderApp('/settings');
     expect(screen.getByLabelText('Organization name')).not.toHaveValue('Test Demo Org');
   });
 
   it('keeps permission switches as demo UI state and protects Super Admin', async () => {
     const user = userEvent.setup();
-    renderApp('/roles');
+    await renderApp('/roles');
     const protectedSwitch = screen.getByRole('switch', { name: /Customers access .*protected/ });
     expect(protectedSwitch).toBeDisabled();
     await user.click(screen.getByRole('button', { name: /Finance Analyst/ }));
@@ -526,7 +592,7 @@ describe('administration demo behavior and reports', () => {
 
   it('switches report datasets and filters statuses and invalid date ranges', async () => {
     const user = userEvent.setup();
-    renderApp('/reports');
+    await renderApp('/reports');
     await user.click(screen.getByRole('tab', { name: 'Refunds' }));
     expect(screen.getAllByRole('row')).toHaveLength(6);
     await user.selectOptions(screen.getByRole('combobox', { name: 'Filter report status' }), 'Pending review');
@@ -553,7 +619,7 @@ describe('administration demo behavior and reports', () => {
       expect(this.download).toBe('digital-gold-refunds-report.csv');
       expect(this.href).toBe('blob:report-test');
     });
-    renderApp('/reports');
+    await renderApp('/reports');
     await user.click(screen.getByRole('tab', { name: 'Refunds' }));
     await user.selectOptions(screen.getByRole('combobox', { name: 'Filter report status' }), 'Pending review');
     await user.click(screen.getByRole('button', { name: 'Export filtered CSV' }));

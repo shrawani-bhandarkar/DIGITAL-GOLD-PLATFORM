@@ -1,6 +1,6 @@
 # Digital Gold Platform — Admin Panel
 
-A frontend-only React admin console built with Vite. It includes the protected demo login, responsive navigation, dashboard, customer management and detail views, metal product catalog, rate approval workflow, buy/sell order and detail views, SIP management, redemption and delivery, gift management, payment and refund review, sample settlement reconciliation, CSV reports, role/permission configuration, settings, and audit logs.
+A React admin console built with Vite. It includes server-verified administrator sign-in, responsive navigation, dashboard, customer management and detail views, metal product catalog, rate approval workflow, buy/sell order and detail views, SIP management, redemption and delivery, gift management, payment and refund review, sample settlement reconciliation, CSV reports, role/permission configuration, settings, and audit logs.
 
 ## Run locally
 
@@ -9,19 +9,30 @@ npm install
 npm run dev
 ```
 
-Create a production build with `npm run build`, or preview it with `npm run preview`.
-Copy `.env.example` to `.env.local` for local configuration. Keep `VITE_API_BASE_URL` empty for demo-only mode.
+Start the API in a second terminal from the repository root with `npm run dev:api`. Configure MySQL in `apps/api/.env` first. The admin-panel Vite server proxies `/api` requests to `http://localhost:4000`; leave `VITE_API_BASE_URL` empty for local development. Create a production build with `npm run build`, or preview it with `npm run preview`.
 
-## Demo access
+## Administrator sign-in
 
-- Email: `admin@digitalgold.demo`
-- Password: `GoldAdmin123!`
+Sign-in checks credentials against the API's `admin_users` table. The API stores password hashes using scrypt and issues an eight-hour, HttpOnly session cookie; only a hash of the session token is stored in MySQL. There are no built-in demo credentials.
 
-This demo authentication is **not production security**. The login state is stored in the browser and must not be used to protect real data or operations. No payment, refund, metal transfer, delivery, or backend persistence is performed by this frontend.
+Before first use, create the MySQL authentication tables and an administrator account from the repository root. Set up the API database and `.env` as described in the root README, then run these commands in Command Prompt:
+
+```cmd
+mysql -u root -p digital_gold_db < apps\api\src\modules\auth\schema.sql
+set ADMIN_EMAIL=you@example.com
+set ADMIN_DISPLAY_NAME=Your Name
+set ADMIN_PASSWORD=use-a-unique-password-at-least-12-characters
+npm run create:admin --workspace @digi-gold/api
+set ADMIN_EMAIL=
+set ADMIN_DISPLAY_NAME=
+set ADMIN_PASSWORD=
+```
+
+Set `NODE_ENV=production` and serve the UI/API over HTTPS in production so the session cookie is marked Secure. Configure `WEB_ORIGIN` to the exact trusted admin-panel origin if it is served separately from the API.
 
 ## Data and API readiness
 
-Dashboard figures, customer profiles, products, rate requests, orders, SIP plans, redemptions, gifts, payment/refund records, settlements, activity, audit events, and transactions are mock data for UI development only. Operational actions, settings, permission-matrix edits, and audit history are held in application memory and reset on a full page reload; in-app navigation does not persist them to a server or database. Demo login state is separately held in browser local storage and is not production authentication. No backend endpoints are assumed or called.
+Dashboard figures, customer profiles, products, rate requests, orders, SIP plans, redemptions, gifts, payment/refund records, settlements, activity, audit events, and transactions are mock data for UI development only. Operational actions, settings, permission-matrix edits, and audit history remain in application memory and reset on a full page reload; they are not persisted by the API. Server-side authorization for future operational endpoints must be implemented before those actions operate on real data.
 
 ### Metal catalog and financial demo calculations
 
@@ -40,12 +51,12 @@ Gold, Silver, and Platinum are supported in the sample product catalog, rate req
 
 ### API client preparation
 
-`src/services/apiClient.js` exports `apiRequest(path, options)` for future same-origin API integration. It:
+`src/services/apiClient.js` exports `apiRequest(path, options)` for same-origin API calls and includes:
 
-- Requires `VITE_API_BASE_URL` to be configured and a path beginning with exactly one `/`.
+- Same-origin `/api` requests by default (proxied to the API during local development), or an optional configured API base URL, and a path beginning with exactly one `/`.
 - JSON-encodes object request bodies, supports browser `FormData`/binary bodies without forcing JSON headers, and sends `Accept: application/json`.
 - Returns `null` for `204` or an empty response, parses JSON responses, and throws explicit errors for HTTP failures, non-JSON bodies, and malformed JSON.
-- Does not provide authentication, retries, endpoint contracts, or a backend. Add those only after the API contract and security requirements are defined.
+- Sends browser credentials for the administrator session. The current authentication endpoints are `POST /api/auth/login`, `GET /api/auth/session`, and `POST /api/auth/logout`.
 
 Vite `VITE_*` values are bundled into client code; never use them for secrets. Use HTTPS for a deployed API and configure CORS/authentication on the server.
 

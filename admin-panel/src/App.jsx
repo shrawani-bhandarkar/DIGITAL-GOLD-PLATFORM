@@ -24,7 +24,11 @@ import AuditLogsPage from './pages/AuditLogsPage.jsx';
 import { AdminProvider } from './context/AdminContext.jsx';
 
 function App() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <main className="login-page" role="status">Checking your sign-in…</main>;
+  }
 
   return (
     <Routes>

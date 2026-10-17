@@ -6,7 +6,17 @@ import { useAuth } from '../context/AuthContext.jsx';
 export default function Topbar({ isMenuOpen = false, onMenuClick, onSearchChange }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
+  const displayName = user?.displayName || user?.email || 'Administrator';
+  const initials = displayName
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+  const roleLabel = user?.role
+    ? user.role.replace(/[-_]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : 'Administrator';
   const { pathname } = useLocation();
   const currentPage = pathname.startsWith('/customers/')
     ? 'Customer details'
@@ -66,14 +76,14 @@ export default function Topbar({ isMenuOpen = false, onMenuClick, onSearchChange
             aria-expanded={profileOpen}
             onClick={() => { setProfileOpen((open) => !open); setNotificationsOpen(false); }}
           >
-            <span className="profile-avatar">SA</span>
-            <span className="profile-copy"><strong>Super Admin</strong><small>Administrator</small></span>
+            <span className="profile-avatar">{initials}</span>
+            <span className="profile-copy"><strong>{displayName}</strong><small>{roleLabel}</small></span>
             <ChevronDown size={15} className="profile-chevron" />
           </button>
           {profileOpen && (
             <div className="topbar-popover profile-popover">
-              <div className="profile-menu-heading"><span className="profile-avatar">SA</span><div><strong>Super Admin</strong><small>admin@digitalgold.demo</small></div></div>
-              <button className="profile-logout" onClick={logout}>Sign out of demo session</button>
+              <div className="profile-menu-heading"><span className="profile-avatar">{initials}</span><div><strong>{displayName}</strong><small>{user?.email}</small></div></div>
+              <button className="profile-logout" onClick={logout}>Sign out</button>
             </div>
           )}
         </div>
