@@ -72,8 +72,8 @@ The Spring Boot API work still required—including endpoint and schema decision
 - Redemptions track sample approval, shipping, payout, and delivery states; gift records support scheduled delivery and simulated resend/cancellation.
 - Payments are read-only sample records; refund decisions and settlement mismatch reviews only change in-memory review labels.
 - Reports export filtered mock records as CSV; exports are not financial statements or settlement instructions.
-- Roles and permissions are an editable UI preview and are not enforced authorization. Settings, operational state, role edits, and audit events remain in memory until reload; the audit feed is neither immutable nor durable and is not server-side security logging.
-- Product/rate/rule editing is frontend demo state, not a security boundary. The existing role permission matrix is unchanged and is not enforced by the frontend; the backend must enforce Super Admin configuration privileges and the Admin role's assigned operational permissions. Customer mobile-app authentication is separate and is not implemented by this admin panel.
+- Only the `SUPER_ADMIN` (Super Admin/shop owner) and `ADMIN` roles are configured. Super Admin has all demo permissions; Admin starts with assigned operational permissions only. Super Admin can edit the Admin permission matrix and preview its restricted navigation. Frontend route checks show an access-denied page when the selected role lacks permission.
+- Role selection, permission edits, product/rate/rule editing, settings, operational state, and audit events are frontend demo state, not production authorization or durable configuration. Backend authorization must enforce Super Admin configuration privileges and Admin assignments. The audit feed is neither immutable nor server-side security logging. Customer mobile-app authentication is separate and is not implemented by this admin panel.
 - All values and actions are for demonstration only and do not persist or execute trades.
 
 ## Tests
@@ -81,7 +81,7 @@ The Spring Boot API work still required—including endpoint and schema decision
 Run the automated component and utility tests with `npm test`. They cover all
 registered routes, demo login, dashboard rendering, list search/filters,
 pagination, supported creation forms, review confirmations, in-memory demo
-state, integer-based financial calculations and invalid inputs, SIP schedules,
+state, the two-role permission matrix and route checks, integer-based financial calculations and invalid inputs, SIP schedules,
 portfolio ledger actions, reconciliation variance/status, dashboard duplicate
 and failed-order handling, the API transport preparation boundary, and CSV
 content/download setup.

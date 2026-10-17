@@ -36,6 +36,7 @@ Sidebar navigation was exercised, and logout was checked to return to the login 
 - Gifts: scheduled gift creation, cancellation, and simulated resend.
 - Payments/refunds: read-only payment records, confirmed refund decisions, and reconciliation review annotation.
 - Administration and reporting: settings edits and in-memory audit entries, permission-matrix edits and Super Admin protection, report dataset/status/date filtering, invalid date ranges, and filtered CSV export.
+- Roles and access: exactly two role identifiers (`SUPER_ADMIN`, `ADMIN`); Super Admin full access; Admin permission save/cancel/confirmation; restricted sidebar and direct-route denial when permission is missing; Admin cannot reach role management or switch itself to Super Admin in the UI.
 - Operational data tables: filtered sorting before pagination, search/filter, empty results, and pagination.
 
 ## Calculation formulas verified
@@ -57,7 +58,7 @@ All fee and tax settings remain explicitly labelled demo configuration. No real 
 ## Automated test and build results
 
 - `npm test` — **passed**: 4 test files, 63 tests.
-- `npm run build` — **passed**: Vite 6.4.4 production build; 2,241 modules transformed.
+- `npm run build` — **passed**: Vite 6.4.4 production build; 2,242 modules transformed.
 - Coverage includes financial formulas and invalid-input boundaries, ledger actions, SIP schedules, reconciliation signs, dashboard duplicate/failed-order handling, routed screens, forms/actions listed above, API-client preparation boundaries, and CSV behavior.
 
 ## Bugs found and fixed
@@ -71,12 +72,15 @@ All fee and tax settings remain explicitly labelled demo configuration. No real 
 - Connected dashboard indicative rates to the active sampled product rates.
 - Confirmed Platinum already existed in product, rate-request, order, and ledger mock data; added its missing dashboard card and active-rate visibility in Rate Management.
 - Routed order/redemption calculations through independently configurable per-product fee, tax, quantity, and redemption policies without assigning Platinum the Gold/Silver redemption defaults.
+- Replaced obsolete admin roles with the fixed `SUPER_ADMIN` and `ADMIN` roles and updated historical mock audit actors.
+- Added a Super-Admin-only Admin permission editor with draft, cancel, and confirmed-save interactions; prevented role creation and Super Admin permission changes.
+- Added selected-demo-role route gates and permission-filtered sidebar navigation, including access-denied feedback for disallowed direct routes.
 
 ## Remaining limitations and untested areas
 
 - The application is a synchronous mock-data frontend; it has no server-backed loading lifecycle. Network loading, backend failures, data consistency, and concurrent updates therefore remain untested.
-- In-memory operational changes reset on reload. Demo login and client-side permission controls are not production authentication or authorization.
+- In-memory operational changes, selected demo role, and permission edits reset on reload. Demo login and client-side permission controls are not production authentication or authorization.
 - The browser smoke check covers rendered routes and basic responsive navigation, not exhaustive device/browser combinations or every visual breakpoint.
 - No real payment provider, refund, metal purchase/sale, recurring SIP debit, delivery, settlement, or financial statement was executed or verified.
 - Demo fee/tax values are zero placeholders until the project coordinator provides approved rules. Platinum redemption remains unavailable until its product-specific fulfillment and quantity settings are configured.
-- The role matrix is unchanged and remains a frontend preview, not authorization. The backend must enforce Super Admin configuration privileges and the Admin role's assigned operational permissions. Customer mobile-app authentication remains separate and is not implemented by this admin panel.
+- Frontend demo access checks are bypassable and do not replace backend authorization. The backend must enforce Super Admin configuration privileges and the Admin role's assigned operational permissions. Customer mobile-app authentication remains separate and is not implemented by this admin panel.

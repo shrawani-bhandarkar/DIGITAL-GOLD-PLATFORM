@@ -568,26 +568,43 @@ describe('administration demo behavior and reports', () => {
     expect(screen.getByLabelText('Organization name')).not.toHaveValue('Test Demo Org');
   });
 
-  it('keeps permission switches as demo UI state and protects Super Admin', async () => {
+  it('limits roles to Super Admin and Admin and lets only Super Admin configure Admin permissions', async () => {
     const user = userEvent.setup();
+<<<<<<< HEAD
     await renderApp('/roles');
     const protectedSwitch = screen.getByRole('switch', { name: /Customers access .*protected/ });
+=======
+    renderApp('/roles');
+    expect(screen.getByText('Configured roles').parentElement).toHaveTextContent('2');
+    const availableRoles = screen.getByRole('region', { name: 'Available roles' });
+    const roleButtons = [...availableRoles.querySelectorAll('.role-list-item')];
+    expect(roleButtons.map((button) => button.querySelector('strong').textContent)).toEqual(['Super Admin', 'Admin']);
+
+    await user.click(roleButtons[0]);
+    const protectedSwitch = screen.getByRole('switch', { name: /Customers access enabled.*always enabled/ });
+>>>>>>> 2e63f88a4290efcb50b92c294536821d5c1234fb
     expect(protectedSwitch).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: /Finance Analyst/ }));
-    const switchControl = screen.getByRole('switch', { name: 'Reports & exports access enabled' });
+    await user.click(roleButtons[1]);
+    const switchControl = screen.getByRole('switch', { name: 'Reports & exports access disabled' });
+    expect(switchControl).toBeEnabled();
     await user.click(switchControl);
-    expect(switchControl).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByText(/do not grant, revoke, or enforce access/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Create role' }));
-    const dialog = screen.getByRole('dialog');
-    await user.type(within(dialog).getByLabelText('Role name'), 'Test Reviewer');
-    await user.type(within(dialog).getByLabelText('Description'), 'Read sample records only');
-    await user.click(within(dialog).getByRole('button', { name: 'Create role' }));
-    expect(screen.getByRole('button', { name: /Test Reviewer/ })).toBeInTheDocument();
-    await goTo('/audit-logs');
-    await user.type(screen.getByRole('textbox', { name: 'Search audit events' }), 'Revoked role permission');
-    await user.click(screen.getByRole('button', { name: /View audit event/ }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('permission disabled in the UI demo');
+    expect(switchControl).toHaveAttribute('aria-checked', 'true');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('switch', { name: 'Reports & exports access disabled' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('switch', { name: 'Products & rates access disabled' }));
+    await user.click(screen.getByRole('button', { name: 'Save permissions' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('frontend demo session');
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save permissions' }));
+    expect(screen.getByRole('switch', { name: 'Products & rates access enabled' })).toBeInTheDocument();
+
+    await user.click(document.querySelector('.profile-button'));
+    await user.click(screen.getByRole('button', { name: 'Preview as Admin' }));
+    expect(screen.getByText(/does not have permission to access this page/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Roles & permissions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Preview as Admin' })).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Access denied');
+    expect(screen.queryByRole('button', { name: /Super Admin/ })).not.toBeInTheDocument();
   });
 
   it('switches report datasets and filters statuses and invalid date ranges', async () => {

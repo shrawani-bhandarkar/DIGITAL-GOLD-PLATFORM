@@ -2,21 +2,13 @@ import { Bell, ChevronDown, Menu, Search, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useAdmin } from '../context/AdminContext.jsx';
 
 export default function Topbar({ isMenuOpen = false, onMenuClick, onSearchChange }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const { logout, user } = useAuth();
-  const displayName = user?.displayName || user?.email || 'Administrator';
-  const initials = displayName
-    .split(/\s+/)
-    .map((part) => part[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-  const roleLabel = user?.role
-    ? user.role.replace(/[-_]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-    : 'Administrator';
+  const { logout } = useAuth();
+  const { activeRole, activeRoleId, setDemoRole } = useAdmin();
   const { pathname } = useLocation();
   const currentPage = pathname.startsWith('/customers/')
     ? 'Customer details'
@@ -76,14 +68,17 @@ export default function Topbar({ isMenuOpen = false, onMenuClick, onSearchChange
             aria-expanded={profileOpen}
             onClick={() => { setProfileOpen((open) => !open); setNotificationsOpen(false); }}
           >
-            <span className="profile-avatar">{initials}</span>
-            <span className="profile-copy"><strong>{displayName}</strong><small>{roleLabel}</small></span>
+            <span className="profile-avatar">{activeRoleId === 'SUPER_ADMIN' ? 'SA' : 'A'}</span>
+            <span className="profile-copy"><strong>{activeRole?.name}</strong><small>{activeRoleId === 'SUPER_ADMIN' ? 'Shop owner · highest privilege' : 'Assigned operational access'}</small></span>
             <ChevronDown size={15} className="profile-chevron" />
           </button>
           {profileOpen && (
             <div className="topbar-popover profile-popover">
-              <div className="profile-menu-heading"><span className="profile-avatar">{initials}</span><div><strong>{displayName}</strong><small>{user?.email}</small></div></div>
-              <button className="profile-logout" onClick={logout}>Sign out</button>
+              <div className="profile-menu-heading"><span className="profile-avatar">{activeRoleId === 'SUPER_ADMIN' ? 'SA' : 'A'}</span><div><strong>{activeRole?.name}</strong><small>{activeRoleId === 'SUPER_ADMIN' ? 'Shop owner · demo session' : 'Assigned operational access'}</small></div></div>
+              {activeRoleId === 'SUPER_ADMIN'
+                ? <button className="profile-logout" onClick={() => { setDemoRole('ADMIN'); setProfileOpen(false); }}>Preview as Admin</button>
+                : <p className="profile-role-note">Admin cannot change their role. Sign out to end this demo session.</p>}
+              <button className="profile-logout" onClick={logout}>Sign out of demo session</button>
             </div>
           )}
         </div>
