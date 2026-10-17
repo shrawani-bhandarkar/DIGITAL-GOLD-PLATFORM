@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.jsx';
+import { DEMO_ACCOUNTS, useAuth } from '../context/AuthContext.jsx';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 export default function LoginPage() {
@@ -72,7 +72,16 @@ export default function LoginPage() {
             {error && <div className="login-error" role="alert">{error}</div>}
             <button className="button button-login" type="submit">Sign in to workspace <ArrowRight size={17} /></button>
           </form>
-          <div className="demo-credentials"><span>DEMO CREDENTIALS</span><code>admin@digitalgold.demo</code><code>GoldAdmin123!</code></div>
+          <div className="demo-credentials" aria-label="Demo login credentials">
+            <span>DEMO CREDENTIALS · FRONTEND ONLY</span>
+            {DEMO_ACCOUNTS.map((account) => (
+              <div className="demo-credential-account" key={account.accountId}>
+                <strong>{account.roleId === 'SUPER_ADMIN' ? 'Super Admin · shop owner' : 'Admin · assigned permissions'}</strong>
+                <code>{account.email}</code>
+                <code>{account.password}</code>
+              </div>
+            ))}
+          </div>
           <p className="login-security-note"><LockKeyhole size={13} /> Demo authentication is for preview only — not production security.</p>
         </div>
         <div className="login-copyright">© 2026 Digital Gold Platform <span>·</span> Admin Console</div>

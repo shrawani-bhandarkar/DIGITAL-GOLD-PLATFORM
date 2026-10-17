@@ -14,14 +14,14 @@ Copy `.env.example` to `.env.local` for local configuration. Keep `VITE_API_BASE
 
 ## Demo access
 
-- Email: `admin@digitalgold.demo`
-- Password: `GoldAdmin123!`
+- **Super Admin (shop owner):** `superadmin@digitalgold.demo` / `SuperAdmin123!`
+- **Admin (assigned permissions):** `admin@digitalgold.demo` / `Admin123!`
 
-This demo authentication is **not production security**. The login state is stored in the browser and must not be used to protect real data or operations. No payment, refund, metal transfer, delivery, or backend persistence is performed by this frontend.
+The matched demo account determines the identity and role; there is no role selector or role-preview switch. The account ID is stored in browser local storage to preserve the demo session across refreshes. This authentication is **not production security**: browser storage and frontend permission checks can be tampered with. Real password verification, authentication, and authorization must be implemented and enforced by the backend. No payment, refund, metal transfer, delivery, or backend persistence is performed by this frontend.
 
 ## Data and API readiness
 
-Dashboard figures, customer profiles, products, rate requests, orders, SIP plans, redemptions, gifts, payment/refund records, settlements, activity, audit events, and transactions are mock data for UI development only. Operational actions, settings, permission-matrix edits, and audit history are held in application memory and reset on a full page reload; in-app navigation does not persist them to a server or database. Demo login state is separately held in browser local storage and is not production authentication. No backend endpoints are assumed or called.
+Dashboard figures, customer profiles, products, rate requests, orders, SIP plans, redemptions, gifts, payment/refund records, settlements, activity, audit events, and transactions are mock data for UI development only. Operational actions, settings, and audit history are held in application memory and reset on a full page reload. Super Admin's Admin-permission configuration is stored in browser local storage so it can be used by the separate Admin demo login; it is not server persistence. No backend endpoints are assumed or called.
 
 ### Metal catalog and financial demo calculations
 
@@ -61,8 +61,8 @@ The Spring Boot API work still required—including endpoint and schema decision
 - Redemptions track sample approval, shipping, payout, and delivery states; gift records support scheduled delivery and simulated resend/cancellation.
 - Payments are read-only sample records; refund decisions and settlement mismatch reviews only change in-memory review labels.
 - Reports export filtered mock records as CSV; exports are not financial statements or settlement instructions.
-- Only the `SUPER_ADMIN` (Super Admin/shop owner) and `ADMIN` roles are configured. Super Admin has all demo permissions; Admin starts with assigned operational permissions only. Super Admin can edit the Admin permission matrix and preview its restricted navigation. Frontend route checks show an access-denied page when the selected role lacks permission.
-- Role selection, permission edits, product/rate/rule editing, settings, operational state, and audit events are frontend demo state, not production authorization or durable configuration. Backend authorization must enforce Super Admin configuration privileges and Admin assignments. The audit feed is neither immutable nor server-side security logging. Customer mobile-app authentication is separate and is not implemented by this admin panel.
+- Only the `SUPER_ADMIN` (Super Admin/shop owner) and `ADMIN` roles are configured. Super Admin has all demo permissions; Admin's permissions are assigned by Super Admin in Roles & Permissions. Users must sign out and authenticate with the separate account to access the other role. Sidebar links and direct routes respect the active demo permissions, with missing permissions denied by default.
+- Role identity is derived from the matched account record, not a stored role string. However, this client-side demo does not provide trustworthy authentication: local storage, permissions, and UI state can be modified by a user. Backend authorization must enforce identity, Super Admin configuration privileges, and Admin assignments. The audit feed is neither immutable nor server-side security logging. Customer mobile-app authentication is separate and is not implemented by this admin panel.
 - All values and actions are for demonstration only and do not persist or execute trades.
 
 ## Tests

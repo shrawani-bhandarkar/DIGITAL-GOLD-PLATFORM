@@ -7,8 +7,8 @@ import { useAdmin } from '../context/AdminContext.jsx';
 export default function Topbar({ isMenuOpen = false, onMenuClick, onSearchChange }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const { logout } = useAuth();
-  const { activeRole, activeRoleId, setDemoRole } = useAdmin();
+  const { logout, user } = useAuth();
+  const { activeRole, activeRoleId } = useAdmin();
   const { pathname } = useLocation();
   const currentPage = pathname.startsWith('/customers/')
     ? 'Customer details'
@@ -69,15 +69,12 @@ export default function Topbar({ isMenuOpen = false, onMenuClick, onSearchChange
             onClick={() => { setProfileOpen((open) => !open); setNotificationsOpen(false); }}
           >
             <span className="profile-avatar">{activeRoleId === 'SUPER_ADMIN' ? 'SA' : 'A'}</span>
-            <span className="profile-copy"><strong>{activeRole?.name}</strong><small>{activeRoleId === 'SUPER_ADMIN' ? 'Shop owner · highest privilege' : 'Assigned operational access'}</small></span>
+            <span className="profile-copy"><strong>{activeRole?.name}</strong><small>{user?.email}</small></span>
             <ChevronDown size={15} className="profile-chevron" />
           </button>
           {profileOpen && (
             <div className="topbar-popover profile-popover">
-              <div className="profile-menu-heading"><span className="profile-avatar">{activeRoleId === 'SUPER_ADMIN' ? 'SA' : 'A'}</span><div><strong>{activeRole?.name}</strong><small>{activeRoleId === 'SUPER_ADMIN' ? 'Shop owner · demo session' : 'Assigned operational access'}</small></div></div>
-              {activeRoleId === 'SUPER_ADMIN'
-                ? <button className="profile-logout" onClick={() => { setDemoRole('ADMIN'); setProfileOpen(false); }}>Preview as Admin</button>
-                : <p className="profile-role-note">Admin cannot change their role. Sign out to end this demo session.</p>}
+              <div className="profile-menu-heading"><span className="profile-avatar">{activeRoleId === 'SUPER_ADMIN' ? 'SA' : 'A'}</span><div><strong>{activeRole?.name}</strong><small>{user?.email}</small></div></div>
               <button className="profile-logout" onClick={logout}>Sign out of demo session</button>
             </div>
           )}

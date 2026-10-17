@@ -8,6 +8,10 @@ import { AuthProvider } from '../context/AuthContext.jsx';
 
 const STORAGE_KEY = 'digital-gold-demo-session';
 
+function persistDemoAccount(accountId = 'demo-super-admin') {
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, accountId }));
+}
+
 function renderApp(path = '/') {
   return render(
     <MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -25,7 +29,7 @@ async function goTo(path) {
 }
 
 beforeEach(() => {
-  window.localStorage.setItem(STORAGE_KEY, 'authenticated');
+  persistDemoAccount();
 });
 
 afterEach(() => {
@@ -37,7 +41,7 @@ afterEach(() => {
 
 describe('routing, authentication, and dashboard', () => {
   it.each([
-    ['/', 'Good morning, Admin'],
+    ['/', 'Good morning, Super Admin'],
     ['/customers', 'Customers'],
     ['/products', 'Metal products'],
     ['/rates', 'Rate management'],
@@ -73,19 +77,75 @@ describe('routing, authentication, and dashboard', () => {
     expect(rateCards.getByText('₹3,120')).toBeInTheDocument();
   });
 
-  it('rejects invalid credentials and accepts demo credentials', async () => {
+  it('rejects invalid credentials and authenticates the separate Super Admin account', async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
-    renderApp('/login');
-    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'admin@digitalgold.demo');
+    const loginView = renderApp('/login');
+    expect(screen.getByLabelText('Demo login credentials')).toHaveTextContent('superadmin@digitalgold.demo');
+    expect(screen.getByLabelText('Demo login credentials')).toHaveTextContent('SuperAdmin123!');
+    expect(screen.getByLabelText('Demo login credentials')).toHaveTextContent('admin@digitalgold.demo');
+    expect(screen.getByLabelText('Demo login credentials')).toHaveTextContent('Admin123!');
+    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'superadmin@digitalgold.demo');
     await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'incorrect');
     await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
     expect(screen.getByRole('alert')).toHaveTextContent('Email or password is incorrect.');
 
+    await user.clear(screen.getByRole('textbox', { name: 'Email address' }));
+    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'admin@digitalgold.demo');
+    await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Email or password is incorrect.');
+
+    await user.clear(screen.getByRole('textbox', { name: 'Email address' }));
+    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'superadmin@digitalgold.demo');
     await user.clear(screen.getByLabelText('Password', { selector: 'input' }));
-    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'GoldAdmin123!');
+    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'SuperAdmin123!');
+    await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
+    expect(await screen.findByRole('heading', { name: 'Good morning, Super Admin' })).toBeInTheDocument();
+    expect(screen.getByText('superadmin@digitalgold.demo')).toBeInTheDocument();
+
+    const persistedSession = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
+    expect(persistedSession).toEqual({ version: 1, accountId: 'demo-super-admin' });
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...persistedSession, roleId: 'ADMIN' }));
+    loginView.unmount();
+    renderApp('/');
+    expect(screen.getByRole('heading', { name: 'Good morning, Super Admin' })).toBeInTheDocument();
+  });
+
+  it('authenticates Admin as Admin, preserves its identity on reload, and rejects an edited role string', async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const view = renderApp('/login');
+    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'admin@digitalgold.demo');
+    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'Admin123!');
     await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
     expect(await screen.findByRole('heading', { name: 'Good morning, Admin' })).toBeInTheDocument();
+    expect(screen.getByText('admin@digitalgold.demo')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Payments' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Roles & permissions' })).not.toBeInTheDocument();
+
+    const session = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...session, roleId: 'SUPER_ADMIN' }));
+    view.unmount();
+    renderApp('/payments');
+    expect(screen.getByRole('alert')).toHaveTextContent('Access denied');
+    expect(screen.getByText('admin@digitalgold.demo')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Payments' })).not.toBeInTheDocument();
+  });
+
+  it('rejects malformed or unknown persisted demo sessions and clears sessions on sign out', async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, accountId: 'unknown-account' }));
+    const loginView = renderApp('/customers');
+    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Customers' })).not.toBeInTheDocument();
+    loginView.unmount();
+
+    window.localStorage.clear();
+    persistDemoAccount('demo-admin');
+    const view = renderApp('/');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    view.unmount();
   });
 
   it('navigates by sidebar and protects routes after logout', async () => {
@@ -504,7 +564,7 @@ describe('administration demo behavior and reports', () => {
 
   it('limits roles to Super Admin and Admin and lets only Super Admin configure Admin permissions', async () => {
     const user = userEvent.setup();
-    renderApp('/roles');
+    const view = renderApp('/roles');
     expect(screen.getByText('Configured roles').parentElement).toHaveTextContent('2');
     const availableRoles = screen.getByRole('region', { name: 'Available roles' });
     const roleButtons = [...availableRoles.querySelectorAll('.role-list-item')];
@@ -527,13 +587,23 @@ describe('administration demo behavior and reports', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save permissions' }));
     expect(screen.getByRole('switch', { name: 'Products & rates access enabled' })).toBeInTheDocument();
 
-    await user.click(document.querySelector('.profile-button'));
-    await user.click(screen.getByRole('button', { name: 'Preview as Admin' }));
-    expect(screen.getByText(/does not have permission to access this page/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'admin@digitalgold.demo');
+    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'Admin123!');
+    await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
+    expect(await screen.findByRole('heading', { name: 'Good morning, Admin' })).toBeInTheDocument();
+    expect(screen.getByText('admin@digitalgold.demo')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Metal products' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Payments' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Roles & permissions' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Preview as Admin' })).not.toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Access denied');
-    expect(screen.queryByRole('button', { name: /Super Admin/ })).not.toBeInTheDocument();
+    await goTo('/products');
+    expect(screen.getByRole('heading', { name: 'Metal products' })).toBeInTheDocument();
+
+    view.unmount();
+    const adminView = renderApp('/roles');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Access denied');
+    adminView.unmount();
   });
 
   it('switches report datasets and filters statuses and invalid date ranges', async () => {
