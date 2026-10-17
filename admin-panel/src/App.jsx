@@ -22,6 +22,11 @@ import RolesPermissionsPage from './pages/RolesPermissionsPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import AuditLogsPage from './pages/AuditLogsPage.jsx';
 import { AdminProvider } from './context/AdminContext.jsx';
+import PermissionGate, { ROUTE_PERMISSIONS } from './components/PermissionGate.jsx';
+
+function permittedPage(path, element) {
+  return <PermissionGate permission={ROUTE_PERMISSIONS[path]}>{element}</PermissionGate>;
+}
 
 function App() {
   const { isAuthenticated } = useAuth();
@@ -32,27 +37,27 @@ function App() {
         path="/login"
         element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />}
       />
-      <Route element={<ProtectedLayout />}>
-        <Route element={<AdminProvider />}>
+      <Route element={<AdminProvider />}>
+        <Route element={<ProtectedLayout />}>
           <Route element={<ManagementProvider />}>
             <Route element={<OperationsProvider />}>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/customers" element={<CustomerManagementPage />} />
-              <Route path="/customers/:customerId" element={<CustomerDetailsPage />} />
-              <Route path="/products" element={<MetalProductsPage />} />
-              <Route path="/rates" element={<RateManagementPage />} />
-              <Route path="/orders" element={<OrdersPage />} />
-              <Route path="/orders/:orderId" element={<OrderDetailsPage />} />
-              <Route path="/sips" element={<SipManagementPage />} />
-              <Route path="/redemptions" element={<RedemptionDeliveryPage />} />
-              <Route path="/gifts" element={<GiftManagementPage />} />
-              <Route path="/payments" element={<PaymentsPage />} />
-              <Route path="/refunds" element={<RefundsPage />} />
-              <Route path="/reconciliation" element={<ReconciliationPage />} />
-              <Route path="/reports" element={<ReportsPage />} />
-              <Route path="/roles" element={<RolesPermissionsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/audit-logs" element={<AuditLogsPage />} />
+              <Route path="/" element={permittedPage('/', <DashboardPage />)} />
+              <Route path="/customers" element={permittedPage('/customers', <CustomerManagementPage />)} />
+              <Route path="/customers/:customerId" element={permittedPage('/customers', <CustomerDetailsPage />)} />
+              <Route path="/products" element={permittedPage('/products', <MetalProductsPage />)} />
+              <Route path="/rates" element={permittedPage('/rates', <RateManagementPage />)} />
+              <Route path="/orders" element={permittedPage('/orders', <OrdersPage />)} />
+              <Route path="/orders/:orderId" element={permittedPage('/orders', <OrderDetailsPage />)} />
+              <Route path="/sips" element={permittedPage('/sips', <SipManagementPage />)} />
+              <Route path="/redemptions" element={permittedPage('/redemptions', <RedemptionDeliveryPage />)} />
+              <Route path="/gifts" element={permittedPage('/gifts', <GiftManagementPage />)} />
+              <Route path="/payments" element={permittedPage('/payments', <PaymentsPage />)} />
+              <Route path="/refunds" element={permittedPage('/refunds', <RefundsPage />)} />
+              <Route path="/reconciliation" element={permittedPage('/reconciliation', <ReconciliationPage />)} />
+              <Route path="/reports" element={permittedPage('/reports', <ReportsPage />)} />
+              <Route path="/roles" element={permittedPage('/roles', <RolesPermissionsPage />)} />
+              <Route path="/settings" element={permittedPage('/settings', <SettingsPage />)} />
+              <Route path="/audit-logs" element={permittedPage('/audit-logs', <AuditLogsPage />)} />
             </Route>
           </Route>
         </Route>

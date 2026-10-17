@@ -56,6 +56,13 @@ export default function MetalProductsPage() {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const values = Object.fromEntries(formData.entries());
+    let redemptionChargePaise;
+    try {
+      redemptionChargePaise = parseMoneyPaise(values.redemptionCharge, 'Redemption charge', true);
+    } catch (error) {
+      setFormError(error.message);
+      return;
+    }
     const buyRate = Number(values.buyRate);
     const sellRate = Number(values.sellRate);
     const minOrder = Number(values.minOrder);
@@ -90,7 +97,6 @@ export default function MetalProductsPage() {
           throw new RangeError(`${label} cannot exceed its maximum quantity.`);
         }
       }
-      parseMoneyPaise(values.redemptionCharge, 'Redemption charge', true);
     } catch (error) {
       setFormError(error.message);
       return;
@@ -115,7 +121,7 @@ export default function MetalProductsPage() {
       minSellQuantity: values.minSellQuantity.trim(), maxSellQuantity: values.maxSellQuantity.trim(),
       redemptionEnabled, allowCoinDelivery, allowCashPayout,
       minRedemptionQuantity: String(values.minRedemptionQuantity ?? '').trim(), maxRedemptionQuantity: String(values.maxRedemptionQuantity ?? '').trim(),
-      redemptionChargePaise: parseMoneyPaise(values.redemptionCharge, 'Redemption charge', true),
+      redemptionChargePaise,
       status: productForm.status ?? 'Active',
     });
     setPage(1);
