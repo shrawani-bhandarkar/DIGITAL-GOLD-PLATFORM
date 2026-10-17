@@ -1,6 +1,6 @@
 # Digital Gold Platform — Admin Panel
 
-A React admin console built with Vite. It includes server-verified administrator sign-in, responsive navigation, dashboard, customer management and detail views, metal product catalog, rate approval workflow, buy/sell order and detail views, SIP management, redemption and delivery, gift management, payment and refund review, sample settlement reconciliation, CSV reports, role/permission configuration, settings, and audit logs.
+A frontend-only React admin console built with Vite. It includes the protected demo login, responsive navigation, dashboard, customer management and detail views, metal product catalog, rate approval workflow, buy/sell order and detail views, SIP management, redemption and delivery, gift management, payment and refund review, sample settlement reconciliation, CSV reports, role/permission configuration, settings, and audit logs.
 
 ## Run locally
 
@@ -9,30 +9,19 @@ npm install
 npm run dev
 ```
 
-Start the API in a second terminal from the repository root with `npm run dev:api`. Configure MySQL in `apps/api/.env` first. The admin-panel Vite server proxies `/api` requests to `http://localhost:4000`; leave `VITE_API_BASE_URL` empty for local development. Create a production build with `npm run build`, or preview it with `npm run preview`.
+Create a production build with `npm run build`, or preview it with `npm run preview`.
+Copy `.env.example` to `.env.local` for local configuration. Keep `VITE_API_BASE_URL` empty for demo-only mode.
 
-## Administrator sign-in
+## Demo access
 
-Sign-in checks credentials against the API's `admin_users` table. The API stores password hashes using scrypt and issues an eight-hour, HttpOnly session cookie; only a hash of the session token is stored in MySQL. There are no built-in demo credentials.
+- **Super Admin (shop owner):** `superadmin@digitalgold.demo` / `SuperAdmin123!`
+- **Admin (assigned permissions):** `admin@digitalgold.demo` / `Admin123!`
 
-Before first use, create the MySQL authentication tables and an administrator account from the repository root. Set up the API database and `.env` as described in the root README, then run these commands in Command Prompt:
-
-```cmd
-mysql -u root -p digital_gold_db < apps\api\src\modules\auth\schema.sql
-set ADMIN_EMAIL=you@example.com
-set ADMIN_DISPLAY_NAME=Your Name
-set ADMIN_PASSWORD=use-a-unique-password-at-least-12-characters
-npm run create:admin --workspace @digi-gold/api
-set ADMIN_EMAIL=
-set ADMIN_DISPLAY_NAME=
-set ADMIN_PASSWORD=
-```
-
-Set `NODE_ENV=production` and serve the UI/API over HTTPS in production so the session cookie is marked Secure. Configure `WEB_ORIGIN` to the exact trusted admin-panel origin if it is served separately from the API.
+The matched demo account determines the identity and role; there is no role selector or role-preview switch. The account ID is stored in browser local storage to preserve the demo session across refreshes. This authentication is **not production security**: browser storage and frontend permission checks can be tampered with. Real password verification, authentication, and authorization must be implemented and enforced by the backend. No payment, refund, metal transfer, delivery, or backend persistence is performed by this frontend.
 
 ## Data and API readiness
 
-Dashboard figures, customer profiles, products, rate requests, orders, SIP plans, redemptions, gifts, payment/refund records, settlements, activity, audit events, and transactions are mock data for UI development only. Operational actions, settings, permission-matrix edits, and audit history remain in application memory and reset on a full page reload; they are not persisted by the API. Server-side authorization for future operational endpoints must be implemented before those actions operate on real data.
+Dashboard figures, customer profiles, products, rate requests, orders, SIP plans, redemptions, gifts, payment/refund records, settlements, activity, audit events, and transactions are mock data for UI development only. Operational actions, settings, and audit history are held in application memory and reset on a full page reload. Super Admin's Admin-permission configuration is stored in browser local storage so it can be used by the separate Admin demo login; it is not server persistence. No backend endpoints are assumed or called.
 
 ### Metal catalog and financial demo calculations
 
@@ -51,12 +40,12 @@ Gold, Silver, and Platinum are supported in the sample product catalog, rate req
 
 ### API client preparation
 
-`src/services/apiClient.js` exports `apiRequest(path, options)` for same-origin API calls and includes:
+`src/services/apiClient.js` exports `apiRequest(path, options)` for future same-origin API integration. It:
 
-- Same-origin `/api` requests by default (proxied to the API during local development), or an optional configured API base URL, and a path beginning with exactly one `/`.
+- Requires `VITE_API_BASE_URL` to be configured and a path beginning with exactly one `/`.
 - JSON-encodes object request bodies, supports browser `FormData`/binary bodies without forcing JSON headers, and sends `Accept: application/json`.
 - Returns `null` for `204` or an empty response, parses JSON responses, and throws explicit errors for HTTP failures, non-JSON bodies, and malformed JSON.
-- Sends browser credentials for the administrator session. The current authentication endpoints are `POST /api/auth/login`, `GET /api/auth/session`, and `POST /api/auth/logout`.
+- Does not provide authentication, retries, endpoint contracts, or a backend. Add those only after the API contract and security requirements are defined.
 
 Vite `VITE_*` values are bundled into client code; never use them for secrets. Use HTTPS for a deployed API and configure CORS/authentication on the server.
 
@@ -72,8 +61,8 @@ The Spring Boot API work still required—including endpoint and schema decision
 - Redemptions track sample approval, shipping, payout, and delivery states; gift records support scheduled delivery and simulated resend/cancellation.
 - Payments are read-only sample records; refund decisions and settlement mismatch reviews only change in-memory review labels.
 - Reports export filtered mock records as CSV; exports are not financial statements or settlement instructions.
-- Only the `SUPER_ADMIN` (Super Admin/shop owner) and `ADMIN` roles are configured. Super Admin has all demo permissions; Admin starts with assigned operational permissions only. Super Admin can edit the Admin permission matrix and preview its restricted navigation. Frontend route checks show an access-denied page when the selected role lacks permission.
-- Role selection, permission edits, product/rate/rule editing, settings, operational state, and audit events are frontend demo state, not production authorization or durable configuration. Backend authorization must enforce Super Admin configuration privileges and Admin assignments. The audit feed is neither immutable nor server-side security logging. Customer mobile-app authentication is separate and is not implemented by this admin panel.
+- Only the `SUPER_ADMIN` (Super Admin/shop owner) and `ADMIN` roles are configured. Super Admin has all demo permissions; Admin's permissions are assigned by Super Admin in Roles & Permissions. Users must sign out and authenticate with the separate account to access the other role. Sidebar links and direct routes respect the active demo permissions, with missing permissions denied by default.
+- Role identity is derived from the matched account record, not a stored role string. However, this client-side demo does not provide trustworthy authentication: local storage, permissions, and UI state can be modified by a user. Backend authorization must enforce identity, Super Admin configuration privileges, and Admin assignments. The audit feed is neither immutable nor server-side security logging. Customer mobile-app authentication is separate and is not implemented by this admin panel.
 - All values and actions are for demonstration only and do not persist or execute trades.
 
 ## Tests

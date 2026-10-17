@@ -35,8 +35,8 @@ export const recentTransactions = [
 ];
 
 export const activityItems = [
-  { id: 1, initials: 'RK', actor: 'Rahul K.', action: 'reviewed verification for', target: 'Customer #CUS-2041', time: '10:36 AM · Customer verification', tone: 'teal' },
-  { id: 2, initials: 'SY', actor: 'System', action: 'flagged a payment exception on', target: 'Order #ORD-83902', time: '10:18 AM · Payment monitoring', tone: 'violet' },
-  { id: 3, initials: 'AM', actor: 'Anita M.', action: 'submitted a rate change for', target: '24K Gold', time: '09:52 AM · Rate management', tone: 'blue' },
-  { id: 4, initials: 'SY', actor: 'System', action: 'sent an installment reminder for', target: 'SIP #SIP-12085', time: '09:30 AM · SIP operations', tone: 'amber' },
+  { id: 1, permission: 'customers', initials: 'RK', actor: 'Admin', action: 'reviewed verification for', target: 'Customer #CUS-2041', time: '10:36 AM · Customer verification', tone: 'teal' },
+  { id: 2, permission: 'finance', initials: 'SY', actor: 'System', action: 'flagged a payment exception on', target: 'Order #ORD-83902', time: '10:18 AM · Payment monitoring', tone: 'violet' },
+  { id: 3, permission: 'products', initials: 'SA', actor: 'Super Admin', action: 'submitted a rate change for', target: '24K Gold', time: '09:52 AM · Rate management', tone: 'blue' },
+  { id: 4, permission: 'orders', initials: 'SY', actor: 'System', action: 'sent an installment reminder for', target: 'SIP #SIP-12085', time: '09:30 AM · SIP operations', tone: 'amber' },
 ];

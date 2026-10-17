@@ -315,6 +315,9 @@ a { color: inherit; text-decoration: none; }
 .demo-credentials { display: flex; align-items: center; gap: 7px; margin-top: 17px; flex-wrap: wrap; color: #8691a1; font-size: 8px; }
 .demo-credentials > span { width: 100%; margin-bottom: 2px; color: #9ba4b1; font-size: 7px; font-weight: 700; letter-spacing: .75px; }
 .demo-credentials code { padding: 4px 6px; color: #677487; border: 1px solid #edf0f4; border-radius: 4px; background: #fafbfd; font-family: 'DM Sans', sans-serif; font-size: 8px; }
+.demo-credential-account { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 5px 8px; padding: 8px; border: 1px solid #edf0f4; border-radius: 6px; background: #fafbfd; }
+.demo-credential-account strong { grid-column: 1 / -1; color: #526176; font-size: 8px; }
+.demo-credential-account code { width: fit-content; max-width: 100%; overflow-wrap: anywhere; }
 .login-security-note { display: flex; align-items: center; justify-content: center; gap: 5px; margin: 20px 0 0; color: #929bab; font-size: 8px; text-align: center; }
 .login-security-note svg { flex: 0 0 auto; }
 .login-copyright { position: absolute; right: 20px; bottom: 20px; left: 20px; color: #a0a8b5; font-size: 8px; text-align: center; }
@@ -430,6 +433,8 @@ a { color: inherit; text-decoration: none; }
   .login-heading { margin-bottom: 23px; }
   .login-heading h2 { font-size: 27px; }
   .demo-credentials { align-items: flex-start; flex-direction: column; }
+  .demo-credential-account { grid-template-columns: 1fr; }
+  .demo-credential-account strong { grid-column: auto; }
   .login-copyright { bottom: 17px; }
 }
 @media (max-width: 370px) {

@@ -9,10 +9,11 @@ import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 export default function RolesPermissionsPage() {
   useDocumentTitle('Roles & permissions');
-  const { roles, activeRoleId, hasPermission, updateRolePermission, recordAudit } = useAdmin();
+  const { roles, activeRoleId, hasPermission, saveAdminPermissions, recordAudit } = useAdmin();
   const [selectedRoleId, setSelectedRoleId] = useState('ADMIN');
   const [draftPermissions, setDraftPermissions] = useState({});
   const [confirmSave, setConfirmSave] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const selectedRole = roles.find((role) => role.id === selectedRoleId) ?? roles[0];
   const canManage = activeRoleId === 'SUPER_ADMIN' && hasPermission('administration');
   const assignedUsers = useMemo(() => roles.reduce((sum, role) => sum + role.users, 0), [roles]);
@@ -29,7 +30,12 @@ export default function RolesPermissionsPage() {
 
   function saveChanges() {
     const changed = PERMISSION_GROUPS.filter(({ key }) => draftPermissions[key] !== adminRole.permissions[key]);
-    for (const { key } of changed) updateRolePermission('ADMIN', key, Boolean(draftPermissions[key]));
+    const result = saveAdminPermissions(draftPermissions);
+    if (!result.success) {
+      setSaveError(result.message);
+      setConfirmSave(false);
+      return;
+    }
     if (changed.length) {
       recordAudit({
         action: 'Updated Admin role permissions',
@@ -38,6 +44,7 @@ export default function RolesPermissionsPage() {
         detail: `Updated demo permissions: ${changed.map(({ label }) => label).join(', ')}.`,
       });
     }
+    setSaveError('');
     setConfirmSave(false);
   }
 
@@ -50,6 +57,7 @@ export default function RolesPermissionsPage() {
     <>
       <PageHeader eyebrow="ADMINISTRATION · DEMO CONFIGURATION" title="Roles & permissions" description="Manage the two supported Admin Panel roles and review their configured access." />
       <SimulatedBanner>Role permissions are frontend demo state only. They do not provide production authorization; enforce all role access on the backend.</SimulatedBanner>
+      {saveError && <p className="form-feedback" role="alert">{saveError}</p>}
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><KeyRound size={17} /></span><div><span>Configured roles</span><strong>{roles.length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-blue"><ShieldCheck size={17} /></span><div><span>Assigned demo users</span><strong>{assignedUsers}</strong></div></article>

@@ -12,6 +12,8 @@ import { formatCurrency } from '../utils/formatters.js';
 import { useManagement } from '../context/ManagementContext.jsx';
 import { useOperations } from '../context/OperationsContext.jsx';
 import { deriveDashboardMetrics } from '../utils/financial.js';
+import { useAdmin } from '../context/AdminContext.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function DashboardPage() {
   useDocumentTitle('Overview');
@@ -19,6 +21,8 @@ export default function DashboardPage() {
   const [period, setPeriod] = useState('30 days');
   const { customers, products } = useManagement();
   const { orders, payments, sips, redemptions } = useOperations();
+  const { activeRole, hasPermission } = useAdmin();
+  const { user } = useAuth();
   const { dashboardSearch = '' } = useOutletContext() ?? {};
   const metrics = deriveDashboardMetrics({ customers, orders, payments, sips, redemptions });
   const displayedRates = metalRates.map((metal) => {
@@ -26,7 +30,17 @@ export default function DashboardPage() {
       && (metal.key !== 'gold' || item.purity.includes('999.9')));
     return product ? { ...metal, purity: `${product.purity} purity`, buy: product.buyRate, sell: product.sellRate } : { ...metal, purity: 'No active product', buy: null, sell: null };
   });
-  const stats = dashboardStats.map((stat) => {
+  const statPermissions = {
+    'Registered customers': 'customers',
+    'Verified customers': 'customers',
+    'Buy / sell volume': 'orders',
+    'Gross transaction value': 'orders',
+    'Pending payments': 'finance',
+    'Failed orders': 'orders',
+    'Pending redemptions': 'fulfillment',
+    'Active SIPs': 'orders',
+  };
+  const stats = dashboardStats.filter((stat) => hasPermission(statPermissions[stat.label])).map((stat) => {
     const values = {
       'Registered customers': [String(metrics.registeredCustomers), 'All sample customer profiles'],
       'Verified customers': [String(metrics.verifiedCustomers), 'Verified sample profiles'],
@@ -56,6 +70,13 @@ export default function DashboardPage() {
         .some((value) => value.toLowerCase().includes(query)),
     ).slice(0, 5);
   }, [dashboardSearch, orders, customers]);
+  const attentionItems = [
+    { permission: 'customers', label: 'Customer verifications', detail: 'Identity checks awaiting review', count: '12', icon: <BadgeCheck size={17} />, tone: 'amber' },
+    { permission: 'products', label: 'Rate change approval', detail: 'Maker-checker review required', count: '2', icon: <RefreshCw size={17} />, tone: 'violet' },
+    { permission: 'finance', label: 'Payment exceptions', detail: 'Transactions needing investigation', count: '4', icon: <WalletCards size={17} />, tone: 'blue' },
+    { permission: 'fulfillment', label: 'Redemption requests', detail: 'Pending fulfilment review', count: '3', icon: <ShieldAlert size={17} />, tone: 'red' },
+  ].filter((item) => hasPermission(item.permission));
+  const visibleActivityItems = activityItems.filter((item) => hasPermission(item.permission));
   const chartData = useMemo(() => {
     if (period === '7 days') return monthlyVolume.slice(-4);
     if (period === '90 days') {
@@ -79,18 +100,18 @@ export default function DashboardPage() {
     <>
       <PageHeader
         eyebrow="THURSDAY, 15 OCTOBER 2026"
-        title="Good morning, Admin"
+        title={`Good morning, ${activeRole?.name ?? user?.name ?? 'Admin'}`}
         description="Here’s what’s happening across your platform today."
         actions={<button className="button button-secondary dashboard-export" onClick={() => window.print()}><Download size={16} /> Export overview</button>}
       />
 
       <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DEMO DATA</strong><span>All rates, customer figures, and financial amounts on this dashboard are sample values for preview only.</span></div>
 
-      <section className="stat-grid" aria-label="Platform metrics">
+      {stats.length > 0 && <section className="stat-grid" aria-label="Platform metrics">
         {stats.map((stat) => <StatCard key={stat.label} {...stat} icon={stat.icon} />)}
-      </section>
+      </section>}
 
-      <section className="rates-section" aria-label="Indicative metal rates">
+      {hasPermission('products') && <section className="rates-section" aria-label="Indicative metal rates">
         <div className="section-heading-row rate-heading">
           <div><h2>Indicative metal rates</h2><p>Sample rates per gram · DEMO DATA</p></div>
           <div className="rate-updated"><RefreshCw size={13} /> Updated 2 min ago</div>
@@ -104,10 +125,10 @@ export default function DashboardPage() {
             </article>
           ))}
         </div>
-      </section>
+      </section>}
 
       <div className="dashboard-main-grid">
-        <section className="panel volume-panel">
+        {hasPermission('orders') && <section className="panel volume-panel">
           <div className="panel-heading">
             <div><h2>Transaction volume</h2><p>Buy &amp; sell value over time · DEMO DATA</p></div>
             <div className="period-control" aria-label="Chart time period">{periods.map((item) => <button className={period === item ? 'selected' : ''} key={item} onClick={() => setPeriod(item)}>{item}</button>)}</div>
@@ -130,30 +151,27 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           </div>
           <div className="volume-summary"><div><span>Completed buy value</span><strong>{formatCurrency(metrics.completedBuyAmountPaise / 100)}</strong><small>30-day sample · completed orders only</small></div><div><span>Completed sell value</span><strong>{formatCurrency(metrics.completedSellAmountPaise / 100)}</strong><small>30-day sample · failed orders excluded</small></div><div><span>Completed transaction value</span><strong>{formatCurrency(metrics.completedAmountPaise / 100)}</strong><small>{metrics.completedOrderCount} unique completed orders · payments are not double-counted</small></div></div>
-        </section>
+        </section>}
 
-        <section className="panel approvals-panel">
+        {attentionItems.length > 0 && <section className="panel approvals-panel">
           <div className="panel-heading"><div><h2>Needs attention</h2><p>Items waiting for your review</p></div><button className="icon-button subtle-icon" aria-label="Attention queue activity"><Activity size={18} /></button></div>
           <div className="approval-list">
-            <div className="approval-item"><span className="approval-icon approval-amber"><BadgeCheck size={17} /></span><div className="approval-copy"><strong>Customer verifications</strong><span>Identity checks awaiting review</span></div><span className="approval-count amber-count">12</span></div>
-            <div className="approval-item"><span className="approval-icon approval-violet"><RefreshCw size={17} /></span><div className="approval-copy"><strong>Rate change approval</strong><span>Maker-checker review required</span></div><span className="approval-count violet-count">2</span></div>
-            <div className="approval-item"><span className="approval-icon approval-blue"><WalletCards size={17} /></span><div className="approval-copy"><strong>Payment exceptions</strong><span>Transactions needing investigation</span></div><span className="approval-count blue-count">4</span></div>
-            <div className="approval-item"><span className="approval-icon approval-red"><ShieldAlert size={17} /></span><div className="approval-copy"><strong>Redemption requests</strong><span>Pending fulfilment review</span></div><span className="approval-count red-count">3</span></div>
+            {attentionItems.map((item) => <div className="approval-item" key={item.permission}><span className={`approval-icon approval-${item.tone}`}>{item.icon}</span><div className="approval-copy"><strong>{item.label}</strong><span>{item.detail}</span></div><span className={`approval-count ${item.tone}-count`}>{item.count}</span></div>)}
           </div>
           <div className="attention-footnote"><Clock3 size={14} /> Queue counts are simulated demo values.</div>
-        </section>
+        </section>}
       </div>
 
       <div className="dashboard-bottom-grid">
-        <section className="panel transactions-panel">
+        {hasPermission('orders') && <section className="panel transactions-panel">
           <div className="panel-heading"><div><h2>Recent transactions</h2><p>Latest activity across your platform · DEMO DATA</p></div><span className="table-count-label">LATEST 5</span></div>
           <DataTable columns={columns} rows={filteredTransactions} />
           <div className="table-footnote"><span>{dashboardSearch.trim() ? `${filteredTransactions.length} matching sample transactions` : 'Showing recent sample transactions'}</span><span>As of 15 Oct 2026</span></div>
-        </section>
-        <section className="panel activity-panel">
+        </section>}
+        {visibleActivityItems.length > 0 && <section className="panel activity-panel">
           <div className="panel-heading"><div><h2>Recent activity</h2><p>Latest admin and platform events</p></div><button className="icon-button subtle-icon" aria-label="More activity options"><CalendarDays size={17} /></button></div>
           <div className="activity-list">
-            {activityItems.map((item) => (
+            {visibleActivityItems.map((item) => (
               <div className="activity-item" key={item.id}>
                 <span className={`activity-avatar activity-${item.tone}`}>{item.initials}</span>
                 <div className="activity-copy"><p><strong>{item.actor}</strong> {item.action} <b>{item.target}</b></p><span>{item.time}</span></div>
@@ -161,7 +179,7 @@ export default function DashboardPage() {
             ))}
           </div>
           <div className="activity-footnote"><span className="activity-footnote-dot" /> Activity feed contains demo events</div>
-        </section>
+        </section>}
       </div>
       <footer className="dashboard-footer"><span>Digital Gold Platform Admin</span><span>Dashboard is in demo mode · No live financial operations</span></footer>
     </>
