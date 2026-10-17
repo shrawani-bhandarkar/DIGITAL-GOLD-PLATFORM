@@ -7,6 +7,7 @@ import { useAdmin } from '../context/AdminContext.jsx';
 export default function Topbar({ isMenuOpen = false, onMenuClick, onSearchChange }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const { logout, user } = useAuth();
   const { activeRole, activeRoleId } = useAdmin();
   const { pathname } = useLocation();
@@ -30,6 +31,15 @@ export default function Topbar({ isMenuOpen = false, onMenuClick, onSearchChange
         '/settings': 'Settings',
         '/audit-logs': 'Audit logs',
       }[pathname] ?? 'Overview');
+
+  async function handleLogout() {
+    setLogoutError('');
+    try {
+      await logout();
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : 'Could not sign out. Please try again.');
+    }
+  }
 
   return (
     <header className="topbar">
@@ -75,7 +85,8 @@ export default function Topbar({ isMenuOpen = false, onMenuClick, onSearchChange
           {profileOpen && (
             <div className="topbar-popover profile-popover">
               <div className="profile-menu-heading"><span className="profile-avatar">{activeRoleId === 'SUPER_ADMIN' ? 'SA' : 'A'}</span><div><strong>{activeRole?.name}</strong><small>{user?.email}</small></div></div>
-              <button className="profile-logout" onClick={logout}>Sign out of demo session</button>
+              {logoutError && <div className="login-error" role="alert">{logoutError}</div>}
+              <button className="profile-logout" onClick={handleLogout}>Sign out</button>
             </div>
           )}
         </div>

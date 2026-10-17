@@ -1,4 +1,5 @@
 import { Coins, LayoutDashboard, LogOut, ShieldCheck, X, Users, Gem, TrendingUp, ArrowLeftRight, CalendarClock, PackageCheck, Gift, CreditCard, RotateCcw, Scale, FileBarChart, KeyRound, Settings, ScrollText } from 'lucide-react';
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useAdmin } from '../context/AdminContext.jsx';
@@ -7,7 +8,17 @@ import { ROUTE_PERMISSIONS } from './PermissionGate.jsx';
 export default function Sidebar({ isOpen, onClose }) {
   const { logout } = useAuth();
   const { hasPermission } = useAdmin();
+  const [logoutError, setLogoutError] = useState('');
   const canVisit = (path) => hasPermission(ROUTE_PERMISSIONS[path]);
+
+  async function handleLogout() {
+    setLogoutError('');
+    try {
+      await logout();
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : 'Could not sign out. Please try again.');
+    }
+  }
 
   return (
     <aside id="main-navigation" className={`sidebar ${isOpen ? 'sidebar-open' : ''}`} aria-label="Main navigation">
@@ -86,7 +97,8 @@ export default function Sidebar({ isOpen, onClose }) {
           <ShieldCheck size={17} />
           <div><strong>Demo environment</strong><span>Sample data only</span></div>
         </div>
-        <button className="sidebar-logout" onClick={logout}>
+        {logoutError && <div className="login-error" role="alert">{logoutError}</div>}
+        <button className="sidebar-logout" onClick={handleLogout}>
           <LogOut size={17} /><span>Sign out</span>
         </button>
         <div className="sidebar-version">ADMIN CONSOLE <span>v0.1.0</span></div>

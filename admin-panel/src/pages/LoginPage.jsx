@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { DEMO_ACCOUNTS, useAuth } from '../context/AuthContext.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 export default function LoginPage() {
@@ -10,23 +10,27 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [touched, setTouched] = useState({});
-  const { login } = useAuth();
+  const { login, authError } = useAuth();
   const navigate = useNavigate();
 
-  const emailError = touched.email && (!email.trim() ? 'Email is required.' : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? 'Enter a valid email address.' : '');
+  const emailError = touched.email && (!email.trim() ? 'Email is required.' : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ? 'Enter a valid email address.' : '');
   const passwordError = touched.password && !password ? 'Password is required.' : '';
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
     setTouched({ email: true, password: true });
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password) return;
-    const result = login(email, password);
-    if (!result.success) {
-      setError(result.message);
-      return;
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || !password) return;
+    setIsSubmitting(true);
+    try {
+      await login(email.trim(), password);
+      navigate('/', { replace: true });
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Sign in failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-    navigate('/', { replace: true });
   }
 
   return (
@@ -56,7 +60,7 @@ export default function LoginPage() {
             <p>Sign in to your administration workspace.</p>
           </div>
 
-          <div className="demo-banner"><span className="demo-banner-icon"><ShieldCheck size={17} /></span><div><strong>Demo access</strong><span>Use the credentials below to explore the dashboard.</span></div></div>
+          <div className="demo-banner"><span className="demo-banner-icon"><ShieldCheck size={17} /></span><div><strong>Administrator access</strong><span>Sign in with your administrator credentials.</span></div></div>
           <form className="login-form" onSubmit={submit} noValidate>
             <label className="form-label" htmlFor="email">Email address</label>
             <div className={`input-wrap ${emailError ? 'input-error' : ''}`}>
@@ -69,20 +73,10 @@ export default function LoginPage() {
               <button type="button" className="password-toggle" onClick={() => setShowPassword((shown) => !shown)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button>
             </div>
             {passwordError && <span className="field-error" id="password-error">{passwordError}</span>}
-            {error && <div className="login-error" role="alert">{error}</div>}
-            <button className="button button-login" type="submit">Sign in to workspace <ArrowRight size={17} /></button>
+            {(error || authError) && <div className="login-error" role="alert">{error || authError}</div>}
+            <button className="button button-login" type="submit" disabled={isSubmitting}>{isSubmitting ? 'Signing in…' : 'Sign in to workspace'} <ArrowRight size={17} /></button>
           </form>
-          <div className="demo-credentials" aria-label="Demo login credentials">
-            <span>DEMO CREDENTIALS · FRONTEND ONLY</span>
-            {DEMO_ACCOUNTS.map((account) => (
-              <div className="demo-credential-account" key={account.accountId}>
-                <strong>{account.roleId === 'SUPER_ADMIN' ? 'Super Admin · shop owner' : 'Admin · assigned permissions'}</strong>
-                <code>{account.email}</code>
-                <code>{account.password}</code>
-              </div>
-            ))}
-          </div>
-          <p className="login-security-note"><LockKeyhole size={13} /> Demo authentication is for preview only — not production security.</p>
+          <p className="login-security-note"><LockKeyhole size={13} /> Your sign-in is protected by a secure server session.</p>
         </div>
         <div className="login-copyright">© 2026 Digital Gold Platform <span>·</span> Admin Console</div>
       </section>

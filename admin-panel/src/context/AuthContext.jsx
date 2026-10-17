@@ -1,81 +1,49 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { apiRequest } from '../services/apiClient.js';
 
-const AuthContext = createContext(null);
-export const STORAGE_KEY = 'digital-gold-demo-session';
-
-export const DEMO_ACCOUNTS = Object.freeze([
-  {
-    accountId: 'demo-super-admin',
-    email: 'superadmin@digitalgold.demo',
-    password: 'SuperAdmin123!',
-    name: 'Shop Owner',
-    roleId: 'SUPER_ADMIN',
-  },
-  {
-    accountId: 'demo-admin',
-    email: 'admin@digitalgold.demo',
-    password: 'Admin123!',
-    name: 'Admin',
-    roleId: 'ADMIN',
-  },
-]);
-
-function publicAccount(account) {
-  if (!account) return null;
-  const { password: _password, ...user } = account;
-  return user;
-}
-
-function accountForSession(rawSession) {
-  if (!rawSession) return null;
-  try {
-    const session = JSON.parse(rawSession);
-    if (session.version !== 1 || typeof session.accountId !== 'string') return null;
-    return publicAccount(DEMO_ACCOUNTS.find((account) => account.accountId === session.accountId));
-  } catch {
-    return null;
-  }
-}
-
-function readSession() {
-  try {
-    return accountForSession(window.localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
+export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(readSession);
+  const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
 
-  function login(email, password) {
-    const account = DEMO_ACCOUNTS.find((candidate) => (
-      candidate.email === email.trim().toLowerCase() && candidate.password === password
-    ));
-    if (!account) return { success: false, message: 'Email or password is incorrect.' };
+  useEffect(() => {
+    let mounted = true;
+    apiRequest('/api/auth/session')
+      .then(({ user: sessionUser }) => {
+        if (mounted) setUser(sessionUser);
+      })
+      .catch(() => {
+        if (mounted) setAuthError('Could not verify your sign-in session. Please sign in again.');
+      })
+      .finally(() => {
+        if (mounted) setIsLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, accountId: account.accountId }));
-    } catch {
-      return { success: false, message: 'Could not save the demo session in this browser.' };
-    }
-    const authenticatedUser = publicAccount(account);
-    setUser(authenticatedUser);
-    return { success: true, user: authenticatedUser };
-  }
+  const login = useCallback(async (email, password) => {
+    const result = await apiRequest('/api/auth/login', {
+      method: 'POST',
+      body: { email, password },
+    });
+    setAuthError('');
+    setUser(result.user);
+    return { success: true, user: result.user };
+  }, []);
 
-  function logout() {
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // The in-memory demo session is still cleared if browser storage is unavailable.
-    }
+  const logout = useCallback(async () => {
+    await apiRequest('/api/auth/logout', { method: 'POST' });
     setUser(null);
-  }
+    setAuthError('');
+  }, []);
 
   const value = useMemo(
-    () => ({ user, isAuthenticated: Boolean(user), login, logout }),
-    [user],
+    () => ({ user, isAuthenticated: Boolean(user), isLoading, authError, login, logout }),
+    [user, isLoading, authError, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import database from "./config/database";
+import adminRouter from "./modules/auth/protected-routes";
 import authRouter from "./modules/auth/routes";
 
 const app = express();
@@ -13,6 +14,7 @@ app.use(
 );
 app.use(express.json());
 app.use("/api/auth", authRouter);
+app.use("/api/admin", adminRouter);
 
 app.get("/api/health", (_request, response) => {
   response.json({ status: "ok" });

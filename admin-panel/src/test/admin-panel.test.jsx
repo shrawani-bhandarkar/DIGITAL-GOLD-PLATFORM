@@ -1,23 +1,50 @@
-// Runtime validation coverage for routed admin behavior and demo-only state.
+// Runtime validation coverage for routed admin behavior and role-based access.
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from '../App.jsx';
-import { AuthProvider } from '../context/AuthContext.jsx';
+import { AuthContext } from '../context/AuthContext.jsx';
 
-const STORAGE_KEY = 'digital-gold-demo-session';
+const SUPER_ADMIN = {
+  id: 1,
+  email: 'owner@digitalgold.demo',
+  name: 'Super Admin',
+  roleId: 'SUPER_ADMIN',
+};
 
-function persistDemoAccount(accountId = 'demo-super-admin') {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, accountId }));
+function TestAuthProvider({ children, initialUser }) {
+  const [user, setUser] = useState(initialUser);
+  const value = {
+    user,
+    isAuthenticated: Boolean(user),
+    isLoading: false,
+    authError: '',
+    login: async (email, password) => {
+      if (email !== 'admin@digitalgold.demo' || password !== 'Admin123!') {
+        throw new Error('Email or password is incorrect.');
+      }
+      const admin = {
+        id: 2,
+        email,
+        name: 'Admin',
+        roleId: 'ADMIN',
+      };
+      setUser(admin);
+      return { success: true, user: admin };
+    },
+    logout: async () => setUser(null),
+  };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-function renderApp(path = '/') {
+function renderApp(path = '/', initialUser = SUPER_ADMIN) {
   return render(
     <MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <AuthProvider>
+      <TestAuthProvider initialUser={initialUser}>
         <App />
-      </AuthProvider>
+      </TestAuthProvider>
     </MemoryRouter>,
   );
 }
@@ -28,6 +55,7 @@ async function goTo(path) {
   await userEvent.click(link);
 }
 
+<<<<<<< HEAD
 function productListPanel() {
   return screen.getByRole('textbox', { name: 'Search products' }).closest('section');
 }
@@ -35,6 +63,9 @@ function productListPanel() {
 beforeEach(() => {
   persistDemoAccount();
 });
+=======
+beforeEach(() => window.localStorage.clear());
+>>>>>>> 24c3ea8 (Fix API connection and login configuration)
 
 afterEach(() => {
   cleanup();
@@ -81,75 +112,31 @@ describe('routing, authentication, and dashboard', () => {
     expect(rateCards.getByText('₹3,120')).toBeInTheDocument();
   });
 
-  it('rejects invalid credentials and authenticates the separate Super Admin account', async () => {
-    window.localStorage.clear();
-    const user = userEvent.setup();
-    const loginView = renderApp('/login');
-    expect(screen.getByLabelText('Demo login credentials')).toHaveTextContent('superadmin@digitalgold.demo');
-    expect(screen.getByLabelText('Demo login credentials')).toHaveTextContent('SuperAdmin123!');
-    expect(screen.getByLabelText('Demo login credentials')).toHaveTextContent('admin@digitalgold.demo');
-    expect(screen.getByLabelText('Demo login credentials')).toHaveTextContent('Admin123!');
-    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'superadmin@digitalgold.demo');
-    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'incorrect');
-    await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Email or password is incorrect.');
-
-    await user.clear(screen.getByRole('textbox', { name: 'Email address' }));
-    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'admin@digitalgold.demo');
-    await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Email or password is incorrect.');
-
-    await user.clear(screen.getByRole('textbox', { name: 'Email address' }));
-    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'superadmin@digitalgold.demo');
-    await user.clear(screen.getByLabelText('Password', { selector: 'input' }));
-    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'SuperAdmin123!');
-    await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
-    expect(await screen.findByRole('heading', { name: 'Good morning, Super Admin' })).toBeInTheDocument();
-    expect(screen.getByText('superadmin@digitalgold.demo')).toBeInTheDocument();
-
-    const persistedSession = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
-    expect(persistedSession).toEqual({ version: 1, accountId: 'demo-super-admin' });
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...persistedSession, roleId: 'ADMIN' }));
-    loginView.unmount();
-    renderApp('/');
-    expect(screen.getByRole('heading', { name: 'Good morning, Super Admin' })).toBeInTheDocument();
+  it('does not expose a hard-coded demo account on the sign-in page', () => {
+    renderApp('/login', null);
+    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
+    expect(screen.queryByText('admin@digitalgold.demo')).not.toBeInTheDocument();
+    expect(screen.queryByText('Admin123!')).not.toBeInTheDocument();
   });
 
-  it('authenticates Admin as Admin, preserves its identity on reload, and rejects an edited role string', async () => {
-    window.localStorage.clear();
-    const user = userEvent.setup();
-    const view = renderApp('/login');
-    await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'admin@digitalgold.demo');
-    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'Admin123!');
-    await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
-    expect(await screen.findByRole('heading', { name: 'Good morning, Admin' })).toBeInTheDocument();
+  it('uses the API-provided Admin role to restrict navigation', () => {
+    const admin = {
+      id: 2,
+      email: 'admin@digitalgold.demo',
+      name: 'Admin',
+      roleId: 'ADMIN',
+    };
+    renderApp('/', admin);
+    expect(screen.getByRole('heading', { name: 'Good morning, Admin' })).toBeInTheDocument();
     expect(screen.getByText('admin@digitalgold.demo')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Payments' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Roles & permissions' })).not.toBeInTheDocument();
-
-    const session = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...session, roleId: 'SUPER_ADMIN' }));
-    view.unmount();
-    renderApp('/payments');
-    expect(screen.getByRole('alert')).toHaveTextContent('Access denied');
-    expect(screen.getByText('admin@digitalgold.demo')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Payments' })).not.toBeInTheDocument();
   });
 
-  it('rejects malformed or unknown persisted demo sessions and clears sessions on sign out', async () => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, accountId: 'unknown-account' }));
-    const loginView = renderApp('/customers');
-    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
+  it('redirects unauthenticated users away from protected routes', () => {
+    renderApp('/customers', null);
+    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Customers' })).not.toBeInTheDocument();
-    loginView.unmount();
-
-    window.localStorage.clear();
-    persistDemoAccount('demo-admin');
-    const view = renderApp('/');
-    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
-    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
-    view.unmount();
   });
 
   it('navigates by sidebar and protects routes after logout', async () => {
@@ -682,7 +669,12 @@ describe('administration demo behavior and reports', () => {
     expect(within(makingChargePanel).queryByRole('button', { name: 'Edit Gold making charge' })).not.toBeInTheDocument();
 
     view.unmount();
-    const adminView = renderApp('/roles');
+    const adminView = renderApp('/roles', {
+      id: 2,
+      email: 'admin@digitalgold.demo',
+      name: 'Admin',
+      roleId: 'ADMIN',
+    });
     expect(await screen.findByRole('alert')).toHaveTextContent('Access denied');
     adminView.unmount();
   });
