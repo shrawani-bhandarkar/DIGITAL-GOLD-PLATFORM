@@ -1,20 +1,78 @@
 import { createContext, useContext, useMemo, useState } from 'react';
 import { Outlet } from 'react-router-dom';
-import { initialCustomers, initialProducts, initialRateRequests } from '../data/managementData.js';
+import { initialCustomers, initialMetalMakingCharges, initialProducts, initialRateRequests } from '../data/managementData.js';
 import { useAdmin } from './AdminContext.jsx';
 
 const ManagementContext = createContext(null);
+const MAKING_CHARGE_STORAGE_KEY = 'digital-gold-demo-metal-making-charges';
+
+function readMetalMakingCharges() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(MAKING_CHARGE_STORAGE_KEY) ?? 'null');
+    if (!Array.isArray(stored)) return initialMetalMakingCharges;
+    const byMetal = new Map(stored.map((item) => [item?.metal, item]));
+    return initialMetalMakingCharges.map((defaults) => {
+      const value = byMetal.get(defaults.metal);
+      return value
+        && Number.isSafeInteger(value.chargePerGramPaise)
+        && value.chargePerGramPaise >= 0
+        && typeof value.enabled === 'boolean'
+        && typeof value.updatedAt === 'string'
+        ? { ...defaults, ...value }
+        : defaults;
+    });
+  } catch {
+    return initialMetalMakingCharges;
+  }
+}
 
 export function ManagementProvider() {
-  const { recordAudit } = useAdmin();
+  const { activeRoleId, recordAudit } = useAdmin();
   const [customers, setCustomers] = useState(initialCustomers);
   const [products, setProducts] = useState(initialProducts);
   const [rateRequests, setRateRequests] = useState(initialRateRequests);
+  const [metalMakingCharges, setMetalMakingCharges] = useState(readMetalMakingCharges);
+
+  function updateMetalMakingCharge(metal, chargePerGramPaise, enabled) {
+    if (activeRoleId !== 'SUPER_ADMIN') {
+      return { success: false, message: 'Only Super Admin can configure metal making charges.' };
+    }
+    if (!initialMetalMakingCharges.some((item) => item.metal === metal)) {
+      return { success: false, message: 'Choose a supported metal.' };
+    }
+    if (!Number.isSafeInteger(chargePerGramPaise) || chargePerGramPaise < 0 || typeof enabled !== 'boolean') {
+      return { success: false, message: 'Making charge must be a non-negative amount and have an explicit status.' };
+    }
+    const updatedAt = new Date().toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    const nextCharges = metalMakingCharges.map((item) => item.metal === metal
+      ? { ...item, chargePerGramPaise, enabled, updatedAt }
+      : item);
+    try {
+      window.localStorage.setItem(MAKING_CHARGE_STORAGE_KEY, JSON.stringify(nextCharges));
+    } catch {
+      return { success: false, message: 'Could not save demo making charges in this browser.' };
+    }
+    setMetalMakingCharges(nextCharges);
+    recordAudit({
+      action: 'Updated metal making charge',
+      category: 'Products',
+      target: metal,
+      detail: `${metal} making charge configured as ${enabled ? 'enabled' : 'disabled'} in demo settings.`,
+    });
+    return { success: true };
+  }
 
   const value = useMemo(() => ({
     customers,
     products,
     rateRequests,
+    metalMakingCharges,
+    updateMetalMakingCharge,
     addCustomer: (customer) => {
       setCustomers((items) => [customer, ...items]);
       recordAudit({ action: 'Created customer profile', category: 'Customers', target: customer.id, detail: 'Demo customer profile created with pending KYC.' });
@@ -51,7 +109,7 @@ export function ManagementProvider() {
         )));
       }
     },
-  }), [customers, products, rateRequests, recordAudit]);
+  }), [customers, products, rateRequests, metalMakingCharges, recordAudit, activeRoleId]);
 
   return <ManagementContext.Provider value={value}><Outlet /></ManagementContext.Provider>;
 }

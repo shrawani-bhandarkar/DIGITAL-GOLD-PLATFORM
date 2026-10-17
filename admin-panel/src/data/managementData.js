@@ -19,6 +19,12 @@ export const initialProducts = [
   { id: 'MET-005', name: 'Platinum', metal: 'Platinum', purity: '950.0', unit: 'gram', buyRate: 3120, sellRate: 2990, minOrder: 10, maxOrder: 200000, buyChargeBps: 0, buyTaxBps: 0, sellChargeBps: 0, sellTaxBps: 0, minBuyQuantity: '', maxBuyQuantity: '', minSellQuantity: '', maxSellQuantity: '', redemptionEnabled: false, allowCoinDelivery: false, allowCashPayout: false, minRedemptionQuantity: '', maxRedemptionQuantity: '', redemptionChargePaise: 0, redemptionTaxBps: 0, status: 'Active' },
 ];
 
+export const initialMetalMakingCharges = [
+  { metal: 'Gold', chargePerGramPaise: 25000, enabled: true, updatedAt: '17 Oct 2026' },
+  { metal: 'Silver', chargePerGramPaise: 1000, enabled: true, updatedAt: '17 Oct 2026' },
+  { metal: 'Platinum', chargePerGramPaise: 30000, enabled: true, updatedAt: '17 Oct 2026' },
+];
+
 export const initialRateRequests = [
   { id: 'RATE-2026-018', metal: 'Gold', purity: '24K · 999.9', buyRate: 7825, sellRate: 7580, change: '+0.42%', status: 'Approved', requestedBy: 'Pricing desk', requestedAt: '15 Oct 2026, 09:42' },
   { id: 'RATE-2026-017', metal: 'Silver', purity: '999.0', buyRate: 96, sellRate: 91, change: '+1.06%', status: 'Approved', requestedBy: 'Pricing desk', requestedAt: '15 Oct 2026, 09:40' },

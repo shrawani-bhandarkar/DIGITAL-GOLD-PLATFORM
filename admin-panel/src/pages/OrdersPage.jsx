@@ -18,7 +18,7 @@ const PAGE_SIZE = 7;
 
 export default function OrdersPage() {
   useDocumentTitle('Buy & sell orders');
-  const { customers, products } = useManagement();
+  const { customers, products, metalMakingCharges } = useManagement();
   const { orders, redemptions, addOrder } = useOperations();
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('All types');
@@ -34,6 +34,7 @@ export default function OrdersPage() {
   const [enteredValue, setEnteredValue] = useState('');
 
   const selectedProduct = products.find((item) => item.id === selectedProductId && item.status === 'Active');
+  const selectedMakingCharge = metalMakingCharges.find((item) => item.metal === selectedProduct?.metal);
   const portfolio = calculatePortfolio([
     ...initialLedgerEntries,
     ...orderLedgerEntries(orders, products),
@@ -44,8 +45,18 @@ export default function OrdersPage() {
   let quoteError = '';
   if (selectedProduct && enteredValue) {
     try {
+      if (orderType === 'Buy' && !selectedMakingCharge) {
+        throw new RangeError(`No making charge configuration is available for ${selectedProduct.metal}.`);
+      }
       quote = orderType === 'Buy'
-        ? calculateBuyQuote({ basis, value: enteredValue, ratePerGram: selectedProduct.buyRate, feePolicy: productFeePolicy(selectedProduct) })
+        ? calculateBuyQuote({
+          basis,
+          value: enteredValue,
+          ratePerGram: selectedProduct.buyRate,
+          feePolicy: productFeePolicy(selectedProduct),
+          makingChargePerGramPaise: selectedMakingCharge.chargePerGramPaise,
+          makingChargeEnabled: selectedMakingCharge.enabled,
+        })
         : calculateSellQuote({ quantity: enteredValue, ratePerGram: selectedProduct.sellRate, feePolicy: productFeePolicy(selectedProduct) });
       assertQuantityWithinConfiguredLimits(quote.quantityMilliGrams, {
         minimum: orderType === 'Buy' ? selectedProduct.minBuyQuantity : selectedProduct.minSellQuantity,
@@ -85,9 +96,20 @@ export default function OrdersPage() {
       return;
     }
     let calculation;
+    const makingCharge = metalMakingCharges.find((item) => item.metal === product.metal);
     try {
+      if (orderType === 'Buy' && !makingCharge) {
+        throw new RangeError(`No making charge configuration is available for ${product.metal}.`);
+      }
       calculation = orderType === 'Buy'
-        ? calculateBuyQuote({ basis, value: basis === 'amount' ? data.amount : data.quantity, ratePerGram: product.buyRate, feePolicy: productFeePolicy(product) })
+        ? calculateBuyQuote({
+          basis,
+          value: basis === 'amount' ? data.amount : data.quantity,
+          ratePerGram: product.buyRate,
+          feePolicy: productFeePolicy(product),
+          makingChargePerGramPaise: makingCharge.chargePerGramPaise,
+          makingChargeEnabled: makingCharge.enabled,
+        })
         : calculateSellQuote({ quantity: data.quantity, ratePerGram: product.sellRate, feePolicy: productFeePolicy(product) });
       assertQuantityWithinConfiguredLimits(calculation.quantityMilliGrams, {
         minimum: orderType === 'Buy' ? product.minBuyQuantity : product.minSellQuantity,
@@ -124,6 +146,10 @@ export default function OrdersPage() {
       customer: customer.name, type: orderType, metal: product.metal, purity: product.purity,
       quantity: calculation.quantityMilliGrams / 1000, amount: totalPaise / 100, baseAmount: baseAmountPaise / 100,
       charges: chargePaise / 100, taxes: taxPaise / 100, rate, payment: data.payment,
+      makingCharges: orderType === 'Buy' ? calculation.makingChargePaise / 100 : 0,
+      makingChargePerGram: orderType === 'Buy' ? makingCharge.chargePerGramPaise / 100 : 0,
+      makingChargeEnabled: orderType === 'Buy' && makingCharge.enabled,
+      purchaseSubtotal: orderType === 'Buy' ? calculation.purchaseSubtotalPaise / 100 : undefined,
       status: 'Pending', placedAt: '15 Oct 2026, just now',
       timeline: [{ label: `${orderType} order created (simulated)`, time: '15 Oct, just now', done: true }, { label: 'Payment and fulfillment', time: 'Awaiting processing', done: false }],
     });
@@ -179,11 +205,27 @@ export default function OrdersPage() {
           </div>
           {orderType === 'Sell' && selectedCustomerId && selectedProductId && <p className="form-help">Available to sell: {formatGrams(availableMilliGrams)} · Sample ledger only.</p>}
           {quote && !quoteError && <div className="quote-breakdown" role="region" aria-label="Estimated order breakdown">
-            <div><span>{orderType === 'Buy' ? 'Base purchase' : 'Gross proceeds'}</span><strong>{formatPaise(orderType === 'Buy' ? quote.baseAmountPaise : quote.grossPaise)}</strong></div>
-            <div><span>Demo charges</span><strong>{formatPaise(quote.chargePaise)}</strong></div>
-            <div><span>Demo taxes</span><strong>{formatPaise(quote.taxPaise)}</strong></div>
-            <div className="quote-total"><span>{orderType === 'Buy' ? 'Estimated quantity' : 'Estimated net proceeds'}</span><strong>{orderType === 'Buy' ? formatGrams(quote.quantityMilliGrams) : formatPaise(quote.netPaise)}</strong></div>
-            {orderType === 'Buy' && <div className="quote-total"><span>Estimated final payable</span><strong>{formatPaise(quote.totalPaise)}</strong></div>}
+            {orderType === 'Buy' ? (
+              <>
+                <div><span>Metal rate / gram</span><strong>{formatCurrency(selectedProduct.buyRate)}</strong></div>
+                <div><span>Weight</span><strong>{formatGrams(quote.quantityMilliGrams)}</strong></div>
+                <div><span>Metal value</span><strong>{formatPaise(quote.baseAmountPaise)}</strong></div>
+                <div><span>Making charge / gram</span><strong>{formatCurrency(selectedMakingCharge.chargePerGramPaise / 100)}{selectedMakingCharge.enabled ? '' : ' · disabled'}</strong></div>
+                <div><span>Total making charges</span><strong>{formatPaise(quote.makingChargePaise)}</strong></div>
+                <div className="quote-total"><span>Purchase subtotal</span><strong>{formatPaise(quote.purchaseSubtotalPaise)}</strong></div>
+                <div><span>Other demo charges</span><strong>{formatPaise(quote.chargePaise)}</strong></div>
+                <div><span>Configured demo taxes</span><strong>{formatPaise(quote.taxPaise)}</strong></div>
+                <div className="quote-total"><span>Estimated quantity</span><strong>{formatGrams(quote.quantityMilliGrams)}</strong></div>
+                <div className="quote-total"><span>Estimated final payable</span><strong>{formatPaise(quote.totalPaise)}</strong></div>
+              </>
+            ) : (
+              <>
+                <div><span>Gross proceeds</span><strong>{formatPaise(quote.grossPaise)}</strong></div>
+                <div><span>Demo selling charges</span><strong>{formatPaise(quote.chargePaise)}</strong></div>
+                <div><span>Configured demo taxes</span><strong>{formatPaise(quote.taxPaise)}</strong></div>
+                <div className="quote-total"><span>Estimated net proceeds</span><strong>{formatPaise(quote.netPaise)}</strong></div>
+              </>
+            )}
           </div>}
           {quoteError && <p className="form-feedback" role="alert">{quoteError}</p>}
           {formError && <p className="form-feedback" role="alert">{formError}</p>}

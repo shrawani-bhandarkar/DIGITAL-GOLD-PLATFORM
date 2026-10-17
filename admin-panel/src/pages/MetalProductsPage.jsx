@@ -7,6 +7,7 @@ import Modal from '../components/Modal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { useManagement } from '../context/ManagementContext.jsx';
+import { useAdmin } from '../context/AdminContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
 import { parseMoneyPaise, parseQuantityMilliGrams } from '../utils/financial.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
@@ -22,7 +23,8 @@ const EMPTY_PRODUCT = {
 
 export default function MetalProductsPage() {
   useDocumentTitle('Metal products');
-  const { products, saveProduct, toggleProduct } = useManagement();
+  const { products, saveProduct, toggleProduct, metalMakingCharges, updateMetalMakingCharge } = useManagement();
+  const { activeRoleId } = useAdmin();
   const [query, setQuery] = useState('');
   const [metalFilter, setMetalFilter] = useState('All metals');
   const [statusFilter, setStatusFilter] = useState('All statuses');
@@ -31,6 +33,10 @@ export default function MetalProductsPage() {
   const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
   const [formError, setFormError] = useState('');
   const [confirmProduct, setConfirmProduct] = useState(null);
+  const [makingChargeForm, setMakingChargeForm] = useState(null);
+  const [makingChargeValue, setMakingChargeValue] = useState('');
+  const [makingChargeEnabled, setMakingChargeEnabled] = useState(false);
+  const [makingChargeError, setMakingChargeError] = useState('');
 
   const filteredProducts = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -128,6 +134,60 @@ export default function MetalProductsPage() {
     setFormOpen(false);
   }
 
+  function openMakingChargeForm(config) {
+    setMakingChargeForm(config);
+    setMakingChargeValue((config.chargePerGramPaise / 100).toFixed(2));
+    setMakingChargeEnabled(config.enabled);
+    setMakingChargeError('');
+  }
+
+  function saveMakingChargeForm(event) {
+    event.preventDefault();
+    let chargePerGramPaise;
+    try {
+      chargePerGramPaise = parseMoneyPaise(makingChargeValue, 'Making charge per gram', true);
+    } catch (error) {
+      setMakingChargeError(error.message);
+      return;
+    }
+    const result = updateMetalMakingCharge(makingChargeForm.metal, chargePerGramPaise, makingChargeEnabled);
+    if (!result.success) {
+      setMakingChargeError(result.message);
+      return;
+    }
+    setMakingChargeForm(null);
+  }
+
+  const makingChargeColumns = [
+    { key: 'metal', label: 'Metal', render: (value) => <div className="product-name-cell"><span className={`metal-icon ${value.toLowerCase()}`}><Gem size={17} /></span><strong>{value}</strong></div> },
+    {
+      key: 'rates',
+      label: 'Customer purchase / sell-back rate per gram',
+      render: (_, row) => (
+        <div className="product-making-rates">
+          {row.rates.map((product) => (
+            <span key={product.id}>{product.purity} purchase: {formatCurrency(product.buyRate)} · sell-back: {formatCurrency(product.sellRate)}</span>
+          ))}
+        </div>
+      ),
+    },
+    { key: 'chargePerGramPaise', label: 'Making charge / gram', align: 'right', render: (value) => formatCurrency(value / 100) },
+    { key: 'enabled', label: 'Status', render: (value) => <StatusBadge status={value ? 'Enabled' : 'Disabled'} /> },
+    { key: 'updatedAt', label: 'Last updated' },
+    {
+      key: 'actions',
+      label: 'Actions',
+      render: (_, row) => activeRoleId === 'SUPER_ADMIN'
+        ? <button className="table-action-link" onClick={() => openMakingChargeForm(row)} aria-label={`Edit ${row.metal} making charge`}><Pencil size={14} /> Edit</button>
+        : <span>View only</span>,
+    },
+  ];
+
+  const makingChargeRows = metalMakingCharges.map((config) => ({
+    ...config,
+    rates: products.filter((product) => product.metal === config.metal && product.status === 'Active'),
+  }));
+
   const columns = [
     { key: 'name', label: 'Metal product', render: (value, row) => <div className="product-name-cell"><span className={`metal-icon ${row.metal.toLowerCase()}`}><Gem size={17} /></span><span><strong>{value}</strong><small>{row.id} · {row.purity} purity</small></span></div> },
     { key: 'metal', label: 'Metal' },
@@ -146,6 +206,13 @@ export default function MetalProductsPage() {
         <article><span className="management-stat-icon stat-icon-teal"><Gem size={17} /></span><div><span>Total products</span><strong>{products.length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-blue"><span className="stat-mini-dot" /></span><div><span>Active products</span><strong>{products.filter((product) => product.status === 'Active').length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-amber"><span className="stat-mini-dot" /></span><div><span>Metals supported</span><strong>{new Set(products.map((product) => product.metal)).size}</strong></div></article>
+      </section>
+      <section className="panel management-panel">
+        <div className="panel-heading">
+          <div><h2>Metal-specific making charges</h2><p>Purchase charges are configured independently for each metal and applied to its selected weight.</p></div>
+        </div>
+        <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DEMO SETTINGS</strong><span>Illustrative values only; no production rates or fees are changed.</span></div>
+        <DataTable columns={makingChargeColumns} rows={makingChargeRows} rowKey="metal" />
       </section>
       <section className="panel management-panel">
         <div className="management-toolbar">
@@ -202,6 +269,45 @@ export default function MetalProductsPage() {
           </div>
           {formError && <p className="form-feedback" role="alert">{formError}</p>}
           <div className="form-actions"><button type="button" className="button button-secondary" onClick={() => setFormOpen(false)}>Cancel</button><button type="submit" className="button button-primary">Save product</button></div>
+        </form>
+      </Modal>
+      <Modal
+        open={Boolean(makingChargeForm)}
+        onClose={() => setMakingChargeForm(null)}
+        title={`Configure ${makingChargeForm?.metal ?? ''} making charge`}
+        description="This setting applies to purchases of the selected metal in this frontend demo."
+      >
+        <form className="management-form" onSubmit={saveMakingChargeForm}>
+          <p className="form-help">
+            Current purchase rate is selected from the active product rate above. Making charges do not apply to sell orders.
+          </p>
+          <label className="field-block">
+            <span>Making charge per gram (₹)</span>
+            <input
+              aria-label="Making charge per gram (₹)"
+              type="number"
+              min="0"
+              step="0.01"
+              required
+              value={makingChargeValue}
+              onChange={(event) => setMakingChargeValue(event.target.value)}
+            />
+          </label>
+          <div className="form-check-row">
+            <label>
+              <input
+                type="checkbox"
+                checked={makingChargeEnabled}
+                onChange={(event) => setMakingChargeEnabled(event.target.checked)}
+              />
+              Making charge enabled for {makingChargeForm?.metal ?? 'this metal'}
+            </label>
+          </div>
+          {makingChargeError && <p className="form-feedback" role="alert">{makingChargeError}</p>}
+          <div className="form-actions">
+            <button type="button" className="button button-secondary" onClick={() => setMakingChargeForm(null)}>Cancel</button>
+            <button type="submit" className="button button-primary">Save making charge</button>
+          </div>
         </form>
       </Modal>
       <ConfirmDialog open={Boolean(confirmProduct)} title={`${confirmProduct?.status === 'Active' ? 'Deactivate' : 'Activate'} product?`} description={`${confirmProduct?.name} will be ${confirmProduct?.status === 'Active' ? 'hidden from' : 'available in'} the demo catalog.`} confirmLabel={confirmProduct?.status === 'Active' ? 'Deactivate' : 'Activate'} destructive={confirmProduct?.status === 'Active'} onCancel={() => setConfirmProduct(null)} onConfirm={() => { toggleProduct(confirmProduct.id); setConfirmProduct(null); }} />

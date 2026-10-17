@@ -28,6 +28,10 @@ async function goTo(path) {
   await userEvent.click(link);
 }
 
+function productListPanel() {
+  return screen.getByRole('textbox', { name: 'Search products' }).closest('section');
+}
+
 beforeEach(() => {
   persistDemoAccount();
 });
@@ -229,7 +233,7 @@ describe('management lists and forms', () => {
   it('validates, creates, edits, and confirms product status changes', async () => {
     const user = userEvent.setup();
     renderApp('/products');
-    expect(screen.getByRole('row', { name: /Platinum/ })).toHaveTextContent('Platinum');
+    expect(within(productListPanel()).getByRole('row', { name: /Platinum/ })).toHaveTextContent('Platinum');
     await user.click(screen.getByRole('button', { name: 'Add product' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: 'Save product' }).closest('form')).not.toBeValid();
@@ -270,6 +274,64 @@ describe('management lists and forms', () => {
     expect(screen.getByRole('row', { name: /18K Digital Gold/ })).toHaveTextContent('Active');
   });
 
+  it('configures independent metal making charges and recalculates purchase quotes without affecting sells', async () => {
+    const user = userEvent.setup();
+    renderApp('/products');
+    const chargePanel = screen.getByRole('heading', { name: 'Metal-specific making charges' }).closest('section');
+    const silverRow = within(chargePanel).getByRole('row', { name: /Silver/ });
+    await user.click(within(silverRow).getByRole('button', { name: 'Edit Silver making charge' }));
+    const editCharge = screen.getByRole('dialog');
+    const silverChargeInput = within(editCharge).getByLabelText('Making charge per gram (₹)');
+    await user.clear(silverChargeInput);
+    await user.type(silverChargeInput, '-1');
+    expect(silverChargeInput).toBeInvalid();
+    await user.clear(silverChargeInput);
+    await user.type(silverChargeInput, '20');
+    await user.click(within(editCharge).getByRole('button', { name: 'Save making charge' }));
+
+    const updatedRows = within(chargePanel).getAllByRole('row');
+    expect(updatedRows.find((row) => row.textContent.includes('Gold'))).toHaveTextContent('₹250');
+    expect(updatedRows.find((row) => row.textContent.includes('Silver'))).toHaveTextContent('₹20');
+    expect(updatedRows.find((row) => row.textContent.includes('Platinum'))).toHaveTextContent('₹300');
+
+    await goTo('/orders');
+    await user.click(screen.getByRole('button', { name: 'New buy' }));
+    const buyDialog = screen.getByRole('dialog');
+    await user.selectOptions(within(buyDialog).getByLabelText('Customer'), 'CUS-10482');
+    await user.selectOptions(within(buyDialog).getByLabelText('Active metal product'), 'MET-003');
+    await user.selectOptions(within(buyDialog).getByLabelText('Purchase basis'), 'quantity');
+    const quantityInput = within(buyDialog).getByLabelText('Quantity (grams)');
+    await user.type(quantityInput, '10');
+    const buyQuote = within(buyDialog).getByRole('region', { name: 'Estimated order breakdown' });
+    expect(buyQuote).toHaveTextContent('Metal rate / gram₹96');
+    expect(buyQuote).toHaveTextContent('Weight10.000 g');
+    expect(buyQuote).toHaveTextContent('Metal value₹960');
+    expect(buyQuote).toHaveTextContent('Making charge / gram₹20');
+    expect(buyQuote).toHaveTextContent('Total making charges₹200');
+    expect(buyQuote).toHaveTextContent('Purchase subtotal₹1,160');
+
+    await user.clear(quantityInput);
+    await user.type(quantityInput, '5');
+    await waitFor(() => {
+      expect(quantityInput).toHaveValue(5);
+      const updatedQuote = within(buyDialog).getByRole('region', { name: 'Estimated order breakdown' });
+      expect(updatedQuote).toHaveTextContent('Weight5.000 g');
+      expect(updatedQuote).toHaveTextContent('Total making charges₹100');
+      expect(updatedQuote).toHaveTextContent('Purchase subtotal₹580');
+    });
+
+    await user.click(within(buyDialog).getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'New sell' }));
+    const sellDialog = screen.getByRole('dialog');
+    await user.selectOptions(within(sellDialog).getByLabelText('Customer'), 'CUS-10482');
+    await user.selectOptions(within(sellDialog).getByLabelText('Active metal product'), 'MET-001');
+    await user.type(within(sellDialog).getByLabelText('Quantity (grams)'), '0.1');
+    const sellQuote = within(sellDialog).getByRole('region', { name: 'Estimated order breakdown' });
+    expect(sellQuote).toHaveTextContent('Gross proceeds₹758');
+    expect(sellQuote).not.toHaveTextContent('Making charge');
+    expect(sellQuote).not.toHaveTextContent('Purchase subtotal');
+  });
+
   it('creates and approves a rate request; supports confirmed rejection', async () => {
     const user = userEvent.setup();
     renderApp('/rates');
@@ -306,7 +368,7 @@ describe('operational workflows', () => {
   it('uses the Platinum product rate and its own configured fee policy in buy estimates', async () => {
     const user = userEvent.setup();
     renderApp('/products');
-    const platinumRow = screen.getByRole('row', { name: /Platinum/ });
+    const platinumRow = within(productListPanel()).getByRole('row', { name: /Platinum/ });
     await user.click(within(platinumRow).getByRole('button', { name: 'Edit Platinum' }));
     const editDialog = screen.getByRole('dialog');
     await user.clear(within(editDialog).getByLabelText('Buy charge (bps)'));
@@ -328,9 +390,12 @@ describe('operational workflows', () => {
     await user.type(within(orderDialog).getByLabelText('Purchase amount (₹)'), '5000');
     const quote = within(orderDialog).getByRole('region', { name: 'Estimated order breakdown' });
     expect(quote).toHaveTextContent('Estimated quantity1.603 g');
-    expect(quote).toHaveTextContent('Demo charges₹50');
-    expect(quote).toHaveTextContent('Demo taxes₹9');
-    expect(quote).toHaveTextContent('Estimated final payable₹5,059');
+    expect(quote).toHaveTextContent('Making charge / gram₹300');
+    expect(quote).toHaveTextContent('Total making charges₹480.9');
+    expect(quote).toHaveTextContent('Purchase subtotal₹5,480.9');
+    expect(quote).toHaveTextContent('Other demo charges₹50');
+    expect(quote).toHaveTextContent('Configured demo taxes₹9');
+    expect(quote).toHaveTextContent('Estimated final payable₹5,539.9');
   });
 
   it('creates a simulated buy order and advances its status only after confirmation', async () => {
@@ -384,14 +449,18 @@ describe('operational workflows', () => {
     await user.selectOptions(within(form).getByLabelText('Active metal product'), 'MET-001');
     await user.selectOptions(within(form).getByLabelText('Purchase basis'), 'quantity');
     await user.type(within(form).getByLabelText('Quantity (grams)'), '1.250');
-    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Base purchase₹9,781.25');
-    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Demo charges₹0');
+    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Metal value₹9,781.25');
+    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Making charge / gram₹250');
+    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Total making charges₹312.5');
+    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Other demo charges₹0');
     await user.selectOptions(within(form).getByLabelText('Payment method'), 'UPI');
     await user.click(within(form).getByRole('button', { name: 'Create demo order' }));
     const createdRow = (await screen.findAllByRole('row'))[1];
     await user.click(within(createdRow).getAllByRole('link')[0]);
     expect(await screen.findByText('1.250 g')).toBeInTheDocument();
-    expect(screen.getAllByText('₹9,781.25')).toHaveLength(2);
+    expect(screen.getByText('Total making charges')).toBeInTheDocument();
+    expect(screen.getByText('Purchase subtotal')).toBeInTheDocument();
+    expect(screen.getAllByText('₹10,093.75')).toHaveLength(2);
     expect(screen.getByText('Estimated final payable')).toBeInTheDocument();
   });
 
@@ -587,6 +656,14 @@ describe('administration demo behavior and reports', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save permissions' }));
     expect(screen.getByRole('switch', { name: 'Products & rates access enabled' })).toBeInTheDocument();
 
+    await goTo('/products');
+    const ownerChargePanel = screen.getByRole('heading', { name: 'Metal-specific making charges' }).closest('section');
+    await user.click(within(ownerChargePanel).getByRole('button', { name: 'Edit Platinum making charge' }));
+    const platinumChargeDialog = screen.getByRole('dialog');
+    await user.clear(within(platinumChargeDialog).getByLabelText('Making charge per gram (₹)'));
+    await user.type(within(platinumChargeDialog).getByLabelText('Making charge per gram (₹)'), '321');
+    await user.click(within(platinumChargeDialog).getByRole('button', { name: 'Save making charge' }));
+
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
     await user.type(screen.getByRole('textbox', { name: 'Email address' }), 'admin@digitalgold.demo');
@@ -599,6 +676,10 @@ describe('administration demo behavior and reports', () => {
     expect(screen.queryByRole('link', { name: 'Roles & permissions' })).not.toBeInTheDocument();
     await goTo('/products');
     expect(screen.getByRole('heading', { name: 'Metal products' })).toBeInTheDocument();
+    const makingChargePanel = screen.getByRole('heading', { name: 'Metal-specific making charges' }).closest('section');
+    expect(within(makingChargePanel).getByRole('row', { name: /Gold/ })).toHaveTextContent('₹250');
+    expect(within(makingChargePanel).getByRole('row', { name: /Platinum/ })).toHaveTextContent('₹321');
+    expect(within(makingChargePanel).queryByRole('button', { name: 'Edit Gold making charge' })).not.toBeInTheDocument();
 
     view.unmount();
     const adminView = renderApp('/roles');

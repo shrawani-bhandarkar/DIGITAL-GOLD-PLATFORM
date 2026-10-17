@@ -31,11 +31,16 @@ export default function OrderDetailsPage() {
           <section className="panel order-summary-panel">
             <div className="order-summary-title"><div><span className={`transaction-type-icon ${order.type.toLowerCase()}`}>{order.type === 'Buy' ? <ArrowUpRight size={17} /> : <WalletCards size={17} />}</span><span><small>Order reference</small><strong>{order.id}</strong></span></div><StatusBadge status={order.status} /></div>
             <div className="order-value-grid">
-              <div><span>{order.type === 'Buy' ? 'Base purchase' : 'Gross proceeds'}</span><strong>{formatCurrency(order.baseAmount ?? order.amount)}</strong></div>
+              <div><span>{order.type === 'Buy' ? 'Metal value' : 'Gross proceeds'}</span><strong>{formatCurrency(order.baseAmount ?? order.amount)}</strong></div>
               <div><span>Metal quantity</span><strong>{Number(order.quantity).toFixed(3)} g</strong></div>
               <div><span>Rate / gram</span><strong>{formatCurrency(order.rate)}</strong></div>
-              <div><span>Demo charges</span><strong>{formatCurrency(order.charges ?? 0)}</strong></div>
-              <div><span>Demo taxes</span><strong>{formatCurrency(order.taxes ?? 0)}</strong></div>
+              {order.type === 'Buy' && Number.isFinite(order.purchaseSubtotal) && <>
+                <div><span>Making charge / gram</span><strong>{formatCurrency(order.makingChargePerGram ?? 0)}{order.makingChargeEnabled ? '' : ' · disabled'}</strong></div>
+                <div><span>Total making charges</span><strong>{formatCurrency(order.makingCharges ?? 0)}</strong></div>
+                <div><span>Purchase subtotal</span><strong>{formatCurrency(order.purchaseSubtotal)}</strong></div>
+              </>}
+              <div><span>{order.type === 'Buy' ? 'Other demo charges' : 'Demo selling charges'}</span><strong>{formatCurrency(order.charges ?? 0)}</strong></div>
+              <div><span>Configured demo taxes</span><strong>{formatCurrency(order.taxes ?? 0)}</strong></div>
               <div><span>{order.type === 'Buy' ? 'Estimated final payable' : 'Estimated net proceeds'}</span><strong>{formatCurrency(order.amount)}</strong></div>
               <div><span>Payment method</span><strong>{order.payment}</strong></div>
             </div>

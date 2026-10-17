@@ -95,12 +95,30 @@ function multiplyDivideRounded(left, right, divisor) {
   return Math.round(product / divisor);
 }
 
+export function calculateMakingChargePaise(quantityMilliGrams, chargePerGramPaise, enabled = true) {
+  if (!Number.isSafeInteger(quantityMilliGrams) || quantityMilliGrams <= 0) {
+    throw new RangeError('Purchase weight must be a positive whole number of milligrams.');
+  }
+  if (!Number.isSafeInteger(chargePerGramPaise) || chargePerGramPaise < 0) {
+    throw new RangeError('Making charge per gram must be a non-negative whole number of paise.');
+  }
+  if (typeof enabled !== 'boolean') throw new RangeError('Making charge status must be enabled or disabled.');
+  return enabled ? multiplyDivideRounded(quantityMilliGrams, chargePerGramPaise, QUANTITY_SCALE) : 0;
+}
+
 function chargeFor(basePaise, basisPoints) {
   if (!Number.isSafeInteger(basisPoints) || basisPoints < 0) throw new RangeError('Fee policy must use non-negative integer basis points.');
   return multiplyDivideRounded(basePaise, basisPoints, 10000);
 }
 
-export function calculateBuyQuote({ basis, value, ratePerGram, feePolicy = DEMO_FEE_POLICY }) {
+export function calculateBuyQuote({
+  basis,
+  value,
+  ratePerGram,
+  feePolicy = DEMO_FEE_POLICY,
+  makingChargePerGramPaise = 0,
+  makingChargeEnabled = false,
+}) {
   const ratePaise = parseRatePaise(ratePerGram);
   let baseAmountPaise;
   let quantityMilliGrams;
@@ -115,10 +133,16 @@ export function calculateBuyQuote({ basis, value, ratePerGram, feePolicy = DEMO_
     throw new RangeError('Choose an amount-based or quantity-based purchase.');
   }
 
+  const makingChargePaise = calculateMakingChargePaise(
+    quantityMilliGrams,
+    makingChargePerGramPaise,
+    makingChargeEnabled,
+  );
+  const purchaseSubtotalPaise = addSafe(baseAmountPaise, makingChargePaise, 'Purchase subtotal');
   const chargePaise = chargeFor(baseAmountPaise, feePolicy.buyChargeBps);
   const taxPaise = chargeFor(chargePaise, feePolicy.buyTaxBps);
-  const totalPaise = addSafe(addSafe(baseAmountPaise, chargePaise, 'Purchase amount'), taxPaise, 'Purchase amount');
-  return { baseAmountPaise, quantityMilliGrams, chargePaise, taxPaise, totalPaise };
+  const totalPaise = addSafe(addSafe(purchaseSubtotalPaise, chargePaise, 'Purchase amount'), taxPaise, 'Purchase amount');
+  return { baseAmountPaise, quantityMilliGrams, makingChargePaise, purchaseSubtotalPaise, chargePaise, taxPaise, totalPaise };
 }
 
 export function calculateSellQuote({ quantity, ratePerGram, feePolicy = DEMO_FEE_POLICY }) {
