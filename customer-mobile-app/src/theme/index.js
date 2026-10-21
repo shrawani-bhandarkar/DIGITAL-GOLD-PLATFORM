@@ -22,6 +22,8 @@ export const colors = {
   warningBackground: '#FBF4E4',
   warningBorder: '#E9DDBB',
   warningText: '#6A592F',
+  disabledBackground: '#E6E8E2',
+  disabledText: '#92968F',
 };
 
 export const spacing = {

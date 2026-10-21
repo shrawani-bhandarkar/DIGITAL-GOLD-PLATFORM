@@ -7,7 +7,60 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { colors, commonStyles } from '../theme';
+
+export function DigiGoldHeader({
+  title,
+  home = false,
+  name,
+  onNotifications,
+  onSupport,
+}) {
+  return (
+    <LinearGradient
+      colors={['#54208E', '#753CB4', '#8B58C7']}
+      end={{ x: 1, y: 1 }}
+      start={{ x: 0, y: 0 }}
+      style={[styles.digiGoldHeader, home && styles.digiGoldHeaderHome]}
+    >
+      <View style={styles.digiGoldHeaderTop}>
+        <View style={styles.digiGoldBrand}>
+          <MaterialCommunityIcons name="gold" size={29} color={colors.gold} />
+          <Text style={styles.digiGoldBrandText}>DigiGold</Text>
+        </View>
+        <View style={styles.digiGoldHeaderActions}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Open notifications"
+            onPress={onNotifications}
+            style={styles.digiGoldHeaderButton}
+          >
+            <MaterialIcons name="notifications-none" size={21} color={colors.surface} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Open support"
+            onPress={onSupport}
+            style={styles.digiGoldHeaderButton}
+          >
+            <MaterialCommunityIcons name="headset" size={20} color={colors.surface} />
+          </TouchableOpacity>
+        </View>
+      </View>
+      {home ? (
+        <>
+          <Text style={styles.digiGoldGreeting}>Good day, {name}</Text>
+          <Text style={styles.digiGoldTagline}>Invest in Gold, Grow Your Future</Text>
+          <Text style={styles.digiGoldSubtitle}>Buy • Sell • Save • Gift digital gold</Text>
+        </>
+      ) : (
+        <Text style={styles.digiGoldPageTitle}>{title}</Text>
+      )}
+    </LinearGradient>
+  );
+}
 
 export function Brand({ compact = false }) {
   return (
@@ -23,27 +76,51 @@ export function Brand({ compact = false }) {
   );
 }
 
-export function Button({ title, onPress, variant = 'primary', disabled, loading, style }) {
+export function Button({
+  title,
+  onPress,
+  variant = 'primary',
+  disabled,
+  loading,
+  loadingLabel = 'Please wait…',
+  state = 'idle',
+  style,
+}) {
   const quiet = variant === 'secondary';
+  const isLoading = loading || state === 'loading';
+  const isDisabled = disabled || isLoading;
+  const isSuccess = state === 'success';
+  const isError = state === 'error';
+  const label = isLoading ? loadingLabel : title;
+  const buttonStateStyle = isDisabled
+    ? quiet ? styles.buttonSecondaryDisabled : styles.buttonPrimaryDisabled
+    : isSuccess ? styles.buttonSuccess : isError ? styles.buttonError : null;
+  const textStateStyle = isDisabled
+    ? styles.buttonDisabledText
+    : isSuccess || isError ? styles.buttonStatusText : null;
   return (
     <TouchableOpacity
       accessibilityRole="button"
-      accessibilityState={{ disabled: Boolean(disabled || loading) }}
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(isDisabled), busy: Boolean(isLoading) }}
       activeOpacity={0.82}
-      disabled={disabled || loading}
+      disabled={isDisabled}
       onPress={onPress}
       style={[
         styles.button,
         quiet ? styles.buttonSecondary : styles.buttonPrimary,
-        (disabled || loading) && styles.disabled,
+        buttonStateStyle,
         style,
       ]}
     >
-      {loading ? (
-        <ActivityIndicator color={quiet ? colors.primary : colors.surface} />
-      ) : (
-        <Text style={[styles.buttonText, quiet && styles.buttonSecondaryText]}>{title}</Text>
-      )}
+      {isLoading ? <ActivityIndicator color={isDisabled ? colors.disabledText : quiet ? colors.primary : colors.surface} /> : null}
+      <Text style={[
+        styles.buttonText,
+        quiet && styles.buttonSecondaryText,
+        textStateStyle,
+      ]}>
+        {isSuccess ? `✓ ${label}` : label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -155,6 +232,34 @@ export function EmptyState({ title, body, symbol = '—' }) {
 }
 
 const styles = StyleSheet.create({
+  digiGoldHeader: {
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    marginBottom: 16,
+    marginHorizontal: -20,
+    marginTop: -16,
+    paddingHorizontal: 20,
+    paddingTop: 15,
+    paddingBottom: 15,
+  },
+  digiGoldHeaderHome: { minHeight: 166, paddingBottom: 17 },
+  digiGoldHeaderTop: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  digiGoldBrand: { alignItems: 'center', flexDirection: 'row' },
+  digiGoldBrandText: { color: colors.surface, fontSize: 17, fontWeight: '900', marginLeft: 7 },
+  digiGoldHeaderActions: { alignItems: 'center', flexDirection: 'row', marginLeft: 8 },
+  digiGoldHeaderButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderRadius: 18,
+    height: 38,
+    justifyContent: 'center',
+    marginLeft: 8,
+    width: 38,
+  },
+  digiGoldGreeting: { color: '#F1E8FA', fontSize: 12, fontWeight: '700', marginTop: 15 },
+  digiGoldTagline: { color: colors.surface, fontSize: 21, fontWeight: '900', lineHeight: 27, marginTop: 3 },
+  digiGoldSubtitle: { color: '#F1E8FA', fontSize: 12, marginTop: 5 },
+  digiGoldPageTitle: { color: colors.surface, fontSize: 19, fontWeight: '900', marginTop: 12 },
   brandRow: { alignItems: 'center', flexDirection: 'row' },
   brandMark: {
     alignItems: 'center',
@@ -171,15 +276,22 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     borderRadius: 14,
+    flexDirection: 'row',
+    gap: 9,
     justifyContent: 'center',
     minHeight: 52,
     paddingHorizontal: 18,
   },
   buttonPrimary: { backgroundColor: colors.primary },
   buttonSecondary: { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
+  buttonPrimaryDisabled: { backgroundColor: colors.disabledBackground },
+  buttonSecondaryDisabled: { backgroundColor: colors.disabledBackground, borderColor: colors.disabledBackground },
+  buttonSuccess: { backgroundColor: colors.success },
+  buttonError: { backgroundColor: colors.error },
   buttonText: { color: colors.surface, fontSize: 15, fontWeight: '800' },
   buttonSecondaryText: { color: colors.primary },
-  disabled: { opacity: 0.48 },
+  buttonDisabledText: { color: colors.disabledText },
+  buttonStatusText: { color: colors.surface },
   demoBadge: {
     alignSelf: 'flex-start',
     backgroundColor: colors.goldLight,
