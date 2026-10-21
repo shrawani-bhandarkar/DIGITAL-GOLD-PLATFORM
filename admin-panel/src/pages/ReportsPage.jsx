@@ -3,10 +3,10 @@ import { BarChart3, Download, FileSpreadsheet, Search } from 'lucide-react';
 import DataTable from '../components/DataTable.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Pagination from '../components/Pagination.jsx';
-import SimulatedBanner from '../components/SimulatedBanner.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { useOperations } from '../context/OperationsContext.jsx';
 import { useAdmin } from '../context/AdminContext.jsx';
+import { apiRequest } from '../services/apiClient.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { dateRangeMatches, downloadCsv, formatDateLabel } from '../utils/csvExport.js';
 import { calculateReconciliationDifference, formatPaise, mockOrderDateKey, parseMoneyPaise, sumPaise } from '../utils/financial.js';
@@ -20,7 +20,7 @@ function reportRecords(type, data) {
   if (type === 'Refunds') return data.refunds.map((row) => ({ id: row.id, reference: row.paymentId, party: row.customer, category: row.reason, amount: row.amount, status: row.status, date: row.date, detail: row.orderId }));
   if (type === 'Settlements') return data.settlements.map((row) => ({ id: row.id, reference: row.settlementRef, party: row.provider, category: `${row.transactions} entries`, amount: calculateReconciliationDifference(row.expected, row.settled) / 100, status: row.status, date: row.date, detail: row.note }));
   return data.orders.map((row) => {
-    const date = mockOrderDateKey(row.placedAt);
+    const date = /^\d{4}-\d{2}-\d{2}/.test(row.placedAt) ? row.placedAt.slice(0, 10) : mockOrderDateKey(row.placedAt);
     return { id: row.id, reference: row.customerId, party: row.customer, category: `${row.type} ${row.metal} · ${row.quantity} g`, amount: row.amount, status: row.status, date, detail: row.payment };
   });
 }
@@ -46,6 +46,8 @@ export default function ReportsPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [page, setPage] = useState(1);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
   const records = useMemo(() => reportRecords(reportType, data), [reportType, data]);
   const statuses = [...new Set(records.map((row) => row.status))];
   const invalidRange = Boolean(startDate && endDate && startDate > endDate);
@@ -59,13 +61,31 @@ export default function ReportsPage() {
   const rows = invalidRange ? [] : filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   useEffect(() => { setPage(1); }, [reportType, statusFilter, query, startDate, endDate]);
   useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
-  const sampleValuePaise = sumPaise(filtered.map((record) => (
+  const totalValuePaise = sumPaise(filtered.map((record) => (
     Math.sign(record.amount) * parseMoneyPaise(Math.abs(record.amount), 'Report amount', true)
   )), 'Report total');
-  function exportReport() {
+  async function exportReport() {
     const filename = `digital-gold-${reportType.toLowerCase()}-report.csv`;
-    downloadCsv(filename, CSV_COLUMNS, filtered);
-    recordAudit({ action: 'Exported report', category: 'Reports', target: filename, detail: `${filtered.length} filtered ${reportType.toLowerCase()} demo rows downloaded locally.`, outcome: 'Completed' });
+    setIsExporting(true);
+    setExportError('');
+    try {
+      const result = await apiRequest('/api/admin/console/reports', {
+        method: 'POST',
+        body: { type: reportType, status: statusFilter, search: query.trim(), startDate, endDate },
+      });
+      downloadCsv(filename, CSV_COLUMNS, result.rows);
+      recordAudit({
+        action: 'Exported report',
+        category: 'Reports',
+        target: filename,
+        detail: `${result.report.recordCount} ${reportType.toLowerCase()} rows were generated from MySQL.`,
+        outcome: 'Completed',
+      });
+    } catch (error) {
+      setExportError(error.message);
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   const columns = [
@@ -85,12 +105,11 @@ export default function ReportsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="ANALYTICS · DEMO DATA" title="Reports" description="Filter operational records and export the matching sample data as CSV." actions={<button className="button button-primary" onClick={exportReport} disabled={invalidRange || filtered.length === 0}><Download size={15} /> Export filtered CSV</button>} />
-      <SimulatedBanner>Reports contain mock operational data only. CSV exports are local downloads and must not be used as statements, settlement instructions, or financial records.</SimulatedBanner>
+      <PageHeader eyebrow="ANALYTICS · MYSQL DATA" title="Reports" description="Filter persisted operational records and export a server-generated report." actions={<button className="button button-primary" onClick={exportReport} disabled={invalidRange || filtered.length === 0 || isExporting}><Download size={15} /> {isExporting ? 'Generating report…' : 'Export filtered CSV'}</button>} />
       <div className="report-type-tabs" role="tablist" aria-label="Report category">{REPORT_TYPES.map((type) => <button role="tab" aria-selected={reportType === type} className={reportType === type ? 'selected' : ''} key={type} onClick={() => changeReportType(type)}><FileSpreadsheet size={14} />{type}</button>)}</div>
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><BarChart3 size={17} /></span><div><span>Filtered records</span><strong>{invalidRange ? 0 : filtered.length}</strong></div></article>
-        <article><span className="management-stat-icon stat-icon-blue"><span className="stat-mini-dot" /></span><div><span>{reportType === 'Settlements' ? 'Net variance' : 'Sample value total'}</span><strong>{formatPaise(sampleValuePaise)}</strong></div></article>
+        <article><span className="management-stat-icon stat-icon-blue"><span className="stat-mini-dot" /></span><div><span>{reportType === 'Settlements' ? 'Net variance' : 'Total value'}</span><strong>{formatPaise(totalValuePaise)}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-amber"><Download size={17} /></span><div><span>Export scope</span><strong className="report-stat-label">Filtered rows</strong></div></article>
       </section>
       <section className="panel management-panel">
@@ -105,6 +124,7 @@ export default function ReportsPage() {
           <span>CSV contains all records matching these filters.</span>
         </div>
         {invalidRange && <p className="filter-error" role="alert">Start date must be on or before end date.</p>}
+        {exportError && <p className="filter-error" role="alert">{exportError}</p>}
         <DataTable columns={columns} rows={rows} allRows={invalidRange ? [] : filtered} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
         <Pagination page={page} pageSize={PAGE_SIZE} total={invalidRange ? 0 : filtered.length} onPageChange={setPage} />
       </section>

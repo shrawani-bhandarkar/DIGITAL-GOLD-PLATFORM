@@ -19,6 +19,11 @@ interface AdminRecord extends RowDataPacket {
   role: string;
 }
 
+interface SuperAdminRecord extends RowDataPacket {
+  id: string | number;
+  email: string;
+}
+
 export interface AuthenticatedRequest extends Request {
   admin: AdminProfile;
 }
@@ -33,7 +38,28 @@ export function readAdminCookie(request: Request): string | null {
 }
 
 export async function findAdminForToken(token: string): Promise<AdminProfile | null> {
-  if (!verifyAdminToken(token)) return null;
+  const claims = verifyAdminToken(token);
+  if (!claims) return null;
+
+  if (claims.accountType === "superadmin") {
+    const [superAdmins] = await database.execute<SuperAdminRecord[]>(
+      `SELECT a.id, a.email
+       FROM superadmin_jwt_sessions AS s
+       INNER JOIN superadmins AS a ON a.id = s.superadmin_id
+       WHERE s.token_hash = ?
+         AND s.expires_at > UTC_TIMESTAMP()
+       LIMIT 1`,
+      [hashAdminToken(token)],
+    );
+    const superAdmin = superAdmins[0];
+    if (!superAdmin) return null;
+    return {
+      id: superAdmin.id,
+      email: superAdmin.email,
+      name: displayNameForEmail(superAdmin.email),
+      roleId: "SUPER_ADMIN",
+    };
+  }
 
   const [admins] = await database.execute<AdminRecord[]>(
     `SELECT a.id, a.email, a.role

@@ -6,18 +6,15 @@ import PageHeader from '../components/PageHeader.jsx';
 import Pagination from '../components/Pagination.jsx';
 import Modal from '../components/Modal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
-import { initialLedgerEntries } from '../data/managementData.js';
 import { useManagement } from '../context/ManagementContext.jsx';
-import { useOperations } from '../context/OperationsContext.jsx';
-import { calculatePortfolio, calculateSellQuote, formatPaise, orderLedgerEntries, redemptionLedgerEntries, sumPaise } from '../utils/financial.js';
+import { calculatePortfolio, calculateSellQuote, formatPaise, sumPaise } from '../utils/financial.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 const PAGE_SIZE = 7;
 
 export default function CustomerManagementPage() {
   useDocumentTitle('Customers');
-  const { customers, products, addCustomer } = useManagement();
-  const { orders, redemptions } = useOperations();
+  const { customers, products, ledgerEntries, addCustomer } = useManagement();
   const [query, setQuery] = useState('');
   const [kycFilter, setKycFilter] = useState('All verification statuses');
   const [accountFilter, setAccountFilter] = useState('All account statuses');
@@ -25,11 +22,7 @@ export default function CustomerManagementPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [formError, setFormError] = useState('');
   const portfolioValues = useMemo(() => {
-    const holdings = calculatePortfolio([
-      ...initialLedgerEntries,
-      ...orderLedgerEntries(orders, products),
-      ...redemptionLedgerEntries(redemptions, products),
-    ]);
+    const holdings = calculatePortfolio(ledgerEntries);
     const values = new Map();
     for (const holding of holdings) {
       const product = products.find((item) => item.id === holding.productId);
@@ -41,7 +34,7 @@ export default function CustomerManagementPage() {
       values.set(holding.customerId, sumPaise([values.get(holding.customerId) ?? 0, valuation.grossPaise], 'Portfolio valuation'));
     }
     return values;
-  }, [orders, products, redemptions]);
+  }, [ledgerEntries, products]);
 
   const filteredCustomers = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -60,7 +53,7 @@ export default function CustomerManagementPage() {
     if (page > pageCount) setPage(pageCount);
   }, [page, pageCount]);
 
-  function createCustomer(event) {
+  async function createCustomer(event) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const name = formData.get('name').trim();
@@ -75,11 +68,12 @@ export default function CustomerManagementPage() {
       setFormError('Enter a valid PAN, for example ABCDE1234F.');
       return;
     }
-    addCustomer({
+    const saved = await addCustomer({
       id: `CUS-${String(Date.now()).slice(-5)}`, name, email, phone, pan,
       city: formData.get('city').trim(), joined: '15 Oct 2026', kycStatus: 'Pending',
       status: 'Active', transactions: 0,
     });
+    if (!saved) { setFormError('Could not save the customer. Check the database connection and try again.'); return; }
     setPage(1);
     setModalOpen(false);
     setFormError('');
@@ -98,7 +92,7 @@ export default function CustomerManagementPage() {
   return (
     <>
       <PageHeader eyebrow="CUSTOMER OPERATIONS" title="Customers" description="Manage customer profiles, account status, and identity verification." actions={<button className="button button-primary" onClick={() => { setFormError(''); setModalOpen(true); }}><UserPlus size={15} /> Add customer</button>} />
-      <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DEMO DATA</strong><span>Customer records and identity information are sample data for preview only.</span></div>
+      <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DATABASE</strong><span>Customer profiles and verification decisions are stored in MySQL.</span></div>
       <section className="management-stat-grid" aria-label="Customer metrics">
         <article><span className="management-stat-icon stat-icon-teal"><Users size={17} /></span><div><span>Total customers</span><strong>{customers.length.toLocaleString('en-IN')}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-amber"><Clock3 size={17} /></span><div><span>Pending verification</span><strong>{pendingCount}</strong></div></article>

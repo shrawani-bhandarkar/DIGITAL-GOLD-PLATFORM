@@ -1,0 +1,17 @@
+
+{
+  "servers": {
+    "mcp-mysql": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@sajithrw/mcp-mysql@1.0.0"],
+      "env": {
+        "MYSQL_HOST": "localhost",
+        "MYSQL_PORT": "3306",
+        "MYSQL_USER": "root",
+        "MYSQL_PASSWORD": "Shau@123",
+        "MYSQL_DATABASE": "digital_gold_db"
+      }
+    }
+  }
+}

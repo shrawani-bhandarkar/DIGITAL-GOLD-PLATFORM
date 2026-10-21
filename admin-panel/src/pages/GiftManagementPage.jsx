@@ -49,7 +49,7 @@ export default function GiftManagementPage() {
   const rows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
 
-  function submitGift(event) {
+  async function submitGift(event) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
     const sender = customers.find((customer) => customer.id === values.senderId);
@@ -69,7 +69,7 @@ export default function GiftManagementPage() {
     }
     const scheduled = values.deliveryDate > TODAY;
     const deliveryDate = formatDate(values.deliveryDate);
-    addGift({
+    const saved = await addGift({
       id: `GFT-2026-${String(Date.now()).slice(-5)}`, sender: sender.name,
       recipient: values.recipient.trim(), recipientEmail: values.recipientEmail.trim().toLowerCase(),
       metal: product.metal, purity: product.purity, amount, message: values.message.trim(),
@@ -81,6 +81,7 @@ export default function GiftManagementPage() {
         { label: 'Gift redeemed', time: 'Awaiting recipient', done: false },
       ],
     });
+    if (!saved) { setFormError('Could not save the gift. Check the database connection and try again.'); return; }
     setPage(1);
     setFormOpen(false);
     setFormError('');
@@ -98,7 +99,7 @@ export default function GiftManagementPage() {
   return (
     <>
       <PageHeader eyebrow="CUSTOMER GIFTING" title="Gift management" description="Manage simulated digital metal gifts, delivery schedules, and recipient activity." actions={<button className="button button-primary" onClick={() => { setFormError(''); setFormOpen(true); }}><Plus size={15} /> Create gift</button>} />
-      <SimulatedBanner>Gift creation, scheduled delivery, and email actions are simulated. No payment is taken and no message is sent.</SimulatedBanner>
+      <SimulatedBanner>Gift records and status changes are stored in MySQL. No payment is taken and no message is sent.</SimulatedBanner>
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><Gift size={17} /></span><div><span>Total gifts</span><strong>{gifts.length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-blue"><Send size={17} /></span><div><span>Scheduled</span><strong>{gifts.filter((gift) => gift.status === 'Scheduled').length}</strong></div></article>
@@ -115,7 +116,7 @@ export default function GiftManagementPage() {
         <DataTable columns={columns} rows={rows} allRows={filtered} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
         <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} />
       </section>
-      <Modal open={formOpen} onClose={() => setFormOpen(false)} title="Create simulated gift" description="Creates a sample gift record only; it will not charge, send, or transfer anything.">
+      <Modal open={formOpen} onClose={() => setFormOpen(false)} title="Create gift" description="Creates a stored gift record; it will not charge, send, or transfer anything.">
         <form className="management-form" onSubmit={submitGift}>
           <div className="form-grid">
             <label className="field-block"><span>Sender</span><select name="senderId" required defaultValue=""><option value="" disabled>Select sender</option>{customers.filter((customer) => customer.status === 'Active').map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>

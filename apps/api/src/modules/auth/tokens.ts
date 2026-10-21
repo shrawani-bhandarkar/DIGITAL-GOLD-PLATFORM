@@ -13,17 +13,23 @@ export interface AdminTokenClaims extends JwtPayload {
   sub: string;
   email: string;
   role: string;
+  accountType?: "admin" | "superadmin";
 }
 
 export interface AdminTokenUser {
   id: string | number;
   email: string;
   role: string;
+  accountType?: "admin" | "superadmin";
 }
 
 export function createAdminToken(admin: AdminTokenUser): string {
   return jwt.sign(
-    { email: admin.email, role: admin.role },
+    {
+      email: admin.email,
+      role: admin.role,
+      accountType: admin.accountType ?? "admin",
+    },
     JWT_SECRET,
     {
       algorithm: "HS256",
@@ -37,11 +43,16 @@ export function createAdminToken(admin: AdminTokenUser): string {
 export function verifyAdminToken(token: string): AdminTokenClaims | null {
   try {
     const claims = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
+    if (typeof claims === "string") return null;
+
+    const accountType = claims.accountType;
     if (
-      typeof claims === "string" ||
       typeof claims.sub !== "string" ||
       typeof claims.email !== "string" ||
-      typeof claims.role !== "string"
+      typeof claims.role !== "string" ||
+      (accountType !== undefined &&
+        accountType !== "admin" &&
+        accountType !== "superadmin")
     ) {
       return null;
     }
@@ -50,6 +61,7 @@ export function verifyAdminToken(token: string): AdminTokenClaims | null {
       sub: claims.sub,
       email: claims.email,
       role: claims.role,
+      accountType,
     };
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) return null;
@@ -57,6 +69,6 @@ export function verifyAdminToken(token: string): AdminTokenClaims | null {
   }
 }
 
-export function hashAdminToken(token: string): Buffer {
-  return createHash("sha256").update(token).digest();
+export function hashAdminToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }

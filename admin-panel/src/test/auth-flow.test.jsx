@@ -13,6 +13,13 @@ const adminUser = {
   roleId: 'ADMIN',
 };
 
+const superAdminUser = {
+  id: 7,
+  email: 'owner@digitalgold.demo',
+  name: 'Owner',
+  roleId: 'SUPER_ADMIN',
+};
+
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -49,7 +56,11 @@ describe('admin authentication flow', () => {
           authenticatedUser = adminUser;
           return jsonResponse({ user: adminUser });
         }
-        return jsonResponse({ message: 'Email or password is incorrect.' }, 401);
+        if (credentials.email === superAdminUser.email && credentials.password === 'OwnerPass123!') {
+          authenticatedUser = superAdminUser;
+          return jsonResponse({ user: superAdminUser });
+        }
+        return jsonResponse({ message: 'Invalid email/username or password.' }, 401);
       }
       if (path === '/api/admin/profile') {
         return authenticatedUser
@@ -76,9 +87,9 @@ describe('admin authentication flow', () => {
 
     await screen.findByRole('heading', { name: 'Welcome back' });
     await user.type(screen.getByRole('textbox', { name: 'Email address' }), adminUser.email);
-    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'wrong');
+    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'WrongPass123!');
     await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Email or password is incorrect.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid email/username or password.');
 
     await user.clear(screen.getByLabelText('Password', { selector: 'input' }));
     await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'Admin123!');
@@ -108,5 +119,42 @@ describe('admin authentication flow', () => {
       method: 'POST',
       credentials: 'include',
     }));
+  });
+
+  it('rejects passwords that do not meet the requirements before submitting', async () => {
+    const user = userEvent.setup();
+    renderLogin();
+
+    await screen.findByRole('heading', { name: 'Welcome back' });
+    await user.type(screen.getByRole('textbox', { name: 'Email address' }), adminUser.email);
+    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'weak');
+    await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
+
+    expect(await screen.findByText(/at least 8 characters/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/auth/login', expect.anything());
+  });
+
+  it('uses the verified Super Admin role from the common login and restores its dashboard session', async () => {
+    const user = userEvent.setup();
+    renderLogin();
+
+    await screen.findByRole('heading', { name: 'Welcome back' });
+    await user.type(screen.getByRole('textbox', { name: 'Email address' }), superAdminUser.email);
+    await user.type(screen.getByLabelText('Password', { selector: 'input' }), 'OwnerPass123!');
+    await user.click(screen.getByRole('button', { name: /Sign in to workspace/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Good morning, Super Admin' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Roles & permissions/ })).toBeInTheDocument();
+
+    const loginCall = fetchMock.mock.calls.find(([path]) => path === '/api/auth/login');
+    expect(JSON.parse(loginCall[1].body)).toEqual({
+      email: superAdminUser.email,
+      password: 'OwnerPass123!',
+    });
+
+    cleanup();
+    renderLogin();
+    expect(await screen.findByRole('heading', { name: 'Good morning, Super Admin' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Roles & permissions/ })).toBeInTheDocument();
   });
 });

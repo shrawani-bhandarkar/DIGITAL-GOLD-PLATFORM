@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bell, Check, RotateCcw, Save, Settings as SettingsIcon, ShieldAlert } from 'lucide-react';
 import PageHeader from '../components/PageHeader.jsx';
-import SimulatedBanner from '../components/SimulatedBanner.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { DEFAULT_SETTINGS } from '../data/adminData.js';
 import { useAdmin } from '../context/AdminContext.jsx';
@@ -22,35 +21,37 @@ export default function SettingsPage() {
     setNotice('');
   }
 
-  function saveSettings(event) {
+  async function saveSettings(event) {
     event.preventDefault();
     if (!draft.organizationName.trim() || !draft.supportEmail.trim()) return;
-    updateSettings({ ...draft, organizationName: draft.organizationName.trim(), supportEmail: draft.supportEmail.trim().toLowerCase() });
+    const result = await updateSettings({ ...draft, organizationName: draft.organizationName.trim(), supportEmail: draft.supportEmail.trim().toLowerCase() });
+    if (!result.success) { setNotice(result.message); return; }
     recordAudit({ action: 'Updated platform settings', category: 'Settings', target: 'Platform preferences', detail: 'Saved local demo settings. No backend configuration changed.' });
-    setNotice('Settings saved in this browser session only.');
+    setNotice('Settings saved.');
   }
 
-  function confirmChange() {
+  async function confirmChange() {
     if (confirmAction === 'maintenance') {
       const maintenanceMode = !draft.maintenanceMode;
       const next = { ...draft, maintenanceMode };
+      const result = await updateSettings(next);
+      if (!result.success) { setNotice(result.message); setConfirmAction(''); return; }
       setDraft(next);
-      updateSettings(next);
       recordAudit({ action: `${maintenanceMode ? 'Enabled' : 'Disabled'} maintenance mode`, category: 'Settings', target: 'Maintenance mode', detail: 'Local demo preference changed; no service availability is affected.' });
-      setNotice(`Demo maintenance mode ${maintenanceMode ? 'enabled' : 'disabled'}. No service availability changed.`);
+      setNotice(`Maintenance mode ${maintenanceMode ? 'enabled' : 'disabled'}.`);
     } else if (confirmAction === 'reset') {
+      const result = await updateSettings(DEFAULT_SETTINGS);
+      if (!result.success) { setNotice(result.message); setConfirmAction(''); return; }
       setDraft(DEFAULT_SETTINGS);
-      updateSettings(DEFAULT_SETTINGS);
       recordAudit({ action: 'Reset platform settings', category: 'Settings', target: 'Platform preferences', detail: 'Restored local demo defaults.' });
-      setNotice('Settings restored to demo defaults.');
+      setNotice('Settings restored.');
     }
     setConfirmAction('');
   }
 
   return (
     <>
-      <PageHeader eyebrow="ADMINISTRATION · LOCAL DEMO" title="Settings" description="Configure display and notification preferences for this browser session." actions={<button className="button button-primary" onClick={() => formRef.current?.requestSubmit()}><Save size={15} /> Save settings</button>} />
-      <SimulatedBanner>Preferences are held in memory for this demo session and reset when the page reloads. They do not update platform services or security policies.</SimulatedBanner>
+      <PageHeader eyebrow="ADMINISTRATION" title="Settings" description="Configure persisted organization, display, and notification preferences." actions={<button className="button button-primary" onClick={() => formRef.current?.requestSubmit()}><Save size={15} /> Save settings</button>} />
       {notice && <div className="operation-notice" role="status"><Check size={14} />{notice}</div>}
       <form ref={formRef} className="settings-form" onSubmit={saveSettings}>
         <section className="panel settings-panel">
@@ -64,12 +65,12 @@ export default function SettingsPage() {
           </div>
         </section>
         <section className="panel settings-panel">
-          <div className="settings-section-heading"><span className="settings-icon settings-icon-blue"><Bell size={17} /></span><div><h2>Notifications &amp; status</h2><p>These toggles only affect the demo preference state.</p></div></div>
+          <div className="settings-section-heading"><span className="settings-icon settings-icon-blue"><Bell size={17} /></span><div><h2>Notifications &amp; status</h2><p>These preferences are stored for the admin console.</p></div></div>
           <div className="settings-options">
             <label className="settings-option"><span><strong>Login alerts</strong><small>Show a local preference for administrator login notifications.</small></span><input type="checkbox" checked={draft.loginAlerts} onChange={(event) => updateField('loginAlerts', event.target.checked)} /></label>
-            <label className="settings-option"><span><strong>Weekly report reminder</strong><small>Enable a demo reminder preference. No email is sent.</small></span><input type="checkbox" checked={draft.weeklyReport} onChange={(event) => updateField('weeklyReport', event.target.checked)} /></label>
+            <label className="settings-option"><span><strong>Weekly report reminder</strong><small>Enable a reminder preference. No email is sent by this API.</small></span><input type="checkbox" checked={draft.weeklyReport} onChange={(event) => updateField('weeklyReport', event.target.checked)} /></label>
           </div>
-          <div className="maintenance-row"><span className="settings-icon settings-icon-amber"><ShieldAlert size={17} /></span><span><strong>Demo maintenance banner</strong><small>Sets a local mock status only; it cannot take the platform offline.</small></span><button type="button" className={`button ${draft.maintenanceMode ? 'button-danger' : 'button-secondary'}`} onClick={() => setConfirmAction('maintenance')}>{draft.maintenanceMode ? 'Turn off' : 'Turn on'} demo banner</button></div>
+          <div className="maintenance-row"><span className="settings-icon settings-icon-amber"><ShieldAlert size={17} /></span><span><strong>Maintenance mode flag</strong><small>Stored setting only; it does not alter API availability.</small></span><button type="button" className={`button ${draft.maintenanceMode ? 'button-danger' : 'button-secondary'}`} onClick={() => setConfirmAction('maintenance')}>{draft.maintenanceMode ? 'Turn off' : 'Turn on'} flag</button></div>
         </section>
         <div className="settings-footer"><button type="button" className="button button-secondary" onClick={() => setConfirmAction('reset')}><RotateCcw size={14} /> Reset to demo defaults</button><button type="submit" className="button button-primary"><Save size={14} /> Save settings</button></div>
       </form>

@@ -1,18 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hashPassword, verifyPassword } from "../src/modules/auth/credentials";
+import { isValidPassword } from "../src/modules/auth/password-validation";
 
-test("password hashes use bcrypt and verify the seeded demo password", async () => {
-  const password = "Admin123!";
-  const passwordHash = await hashPassword(password);
-
-  assert.notEqual(passwordHash, password);
-  assert.match(passwordHash, /^\$2[aby]\$12\$/);
-  assert.equal(await verifyPassword(password, passwordHash), true);
-  assert.equal(await verifyPassword("a-different-password", passwordHash), false);
+test("password validation requires length and all four character categories", () => {
+  assert.equal(isValidPassword("Admin123!"), true);
+  assert.equal(isValidPassword("OwnerPass123!"), true);
+  assert.equal(isValidPassword("short1A!"), true);
+  assert.equal(isValidPassword("Short1!"), false);
+  assert.equal(isValidPassword("lowercase1!"), false);
+  assert.equal(isValidPassword("UPPERCASE1!"), false);
+  assert.equal(isValidPassword("NoNumber!"), false);
+  assert.equal(isValidPassword("NoSpecial123"), false);
 });
 
-test("password verification rejects malformed hashes", async () => {
-  assert.equal(await verifyPassword("password", "invalid"), false);
-  assert.equal(await verifyPassword("password", "scrypt$16384$8$1$AA$AA"), false);
-});

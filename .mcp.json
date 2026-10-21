@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mcp-mysql": {
+      "command": "node",
+      "args": ["scripts/launch-mysql-mcp.cjs"]
+    }
+  }
+}

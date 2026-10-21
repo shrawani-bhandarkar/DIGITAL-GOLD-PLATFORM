@@ -58,7 +58,7 @@ export default function MetalProductsPage() {
     setFormOpen(true);
   }
 
-  function saveProductForm(event) {
+  async function saveProductForm(event) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const values = Object.fromEntries(formData.entries());
@@ -119,7 +119,7 @@ export default function MetalProductsPage() {
       setFormError('A product with this name already exists.');
       return;
     }
-    saveProduct({
+    const saved = await saveProduct({
       id: productForm.id ?? `MET-${String(Date.now()).slice(-5)}`,
       ...values, name, purity: values.purity.trim(),
       buyRate, sellRate, minOrder, maxOrder, buyChargeBps, buyTaxBps, sellChargeBps, sellTaxBps, redemptionTaxBps,
@@ -130,6 +130,7 @@ export default function MetalProductsPage() {
       redemptionChargePaise,
       status: productForm.status ?? 'Active',
     });
+    if (!saved) { setFormError('Could not save the product. Check the database connection and try again.'); return; }
     setPage(1);
     setFormOpen(false);
   }
@@ -141,7 +142,7 @@ export default function MetalProductsPage() {
     setMakingChargeError('');
   }
 
-  function saveMakingChargeForm(event) {
+  async function saveMakingChargeForm(event) {
     event.preventDefault();
     let chargePerGramPaise;
     try {
@@ -150,7 +151,7 @@ export default function MetalProductsPage() {
       setMakingChargeError(error.message);
       return;
     }
-    const result = updateMetalMakingCharge(makingChargeForm.metal, chargePerGramPaise, makingChargeEnabled);
+    const result = await updateMetalMakingCharge(makingChargeForm.metal, chargePerGramPaise, makingChargeEnabled);
     if (!result.success) {
       setMakingChargeError(result.message);
       return;
@@ -201,7 +202,7 @@ export default function MetalProductsPage() {
   return (
     <>
       <PageHeader eyebrow="CATALOG & PRICING" title="Metal products" description="Configure Gold, Silver, Platinum, per-product rates, charges, quantity limits, and redemption rules." actions={<button className="button button-primary" onClick={() => openForm()}><Plus size={15} /> Add product</button>} />
-      <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DEMO DATA</strong><span>Rates and rule values are editable demo placeholders, not approved platform policy. No trades are executed.</span></div>
+      <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DATABASE</strong><span>Product rules, rates, and making charges are stored in MySQL. No trades are executed.</span></div>
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><Gem size={17} /></span><div><span>Total products</span><strong>{products.length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-blue"><span className="stat-mini-dot" /></span><div><span>Active products</span><strong>{products.filter((product) => product.status === 'Active').length}</strong></div></article>
@@ -211,7 +212,7 @@ export default function MetalProductsPage() {
         <div className="panel-heading">
           <div><h2>Metal-specific making charges</h2><p>Purchase charges are configured independently for each metal and applied to its selected weight.</p></div>
         </div>
-        <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DEMO SETTINGS</strong><span>Illustrative values only; no production rates or fees are changed.</span></div>
+        <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>STORED SETTINGS</strong><span>Making charges are saved as admin configuration; customer transactions are not triggered.</span></div>
         <DataTable columns={makingChargeColumns} rows={makingChargeRows} rowKey="metal" />
       </section>
       <section className="panel management-panel">

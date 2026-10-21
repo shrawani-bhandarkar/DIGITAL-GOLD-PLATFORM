@@ -1,43 +1,45 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Outlet } from 'react-router-dom';
-import { initialCustomers, initialMetalMakingCharges, initialProducts, initialRateRequests } from '../data/managementData.js';
+import { apiRequest } from '../services/apiClient.js';
 import { useAdmin } from './AdminContext.jsx';
 
 const ManagementContext = createContext(null);
-const MAKING_CHARGE_STORAGE_KEY = 'digital-gold-demo-metal-making-charges';
-
-function readMetalMakingCharges() {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(MAKING_CHARGE_STORAGE_KEY) ?? 'null');
-    if (!Array.isArray(stored)) return initialMetalMakingCharges;
-    const byMetal = new Map(stored.map((item) => [item?.metal, item]));
-    return initialMetalMakingCharges.map((defaults) => {
-      const value = byMetal.get(defaults.metal);
-      return value
-        && Number.isSafeInteger(value.chargePerGramPaise)
-        && value.chargePerGramPaise >= 0
-        && typeof value.enabled === 'boolean'
-        && typeof value.updatedAt === 'string'
-        ? { ...defaults, ...value }
-        : defaults;
-    });
-  } catch {
-    return initialMetalMakingCharges;
-  }
-}
-
+const SUPPORTED_METALS = ['Gold', 'Silver', 'Platinum'];
 export function ManagementProvider() {
-  const { activeRoleId, recordAudit } = useAdmin();
-  const [customers, setCustomers] = useState(initialCustomers);
-  const [products, setProducts] = useState(initialProducts);
-  const [rateRequests, setRateRequests] = useState(initialRateRequests);
-  const [metalMakingCharges, setMetalMakingCharges] = useState(readMetalMakingCharges);
+  const { activeRoleId, recordAudit, setPersistenceError, consoleState } = useAdmin();
+  const [customers, setCustomers] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [rateRequests, setRateRequests] = useState([]);
+  const [metalMakingCharges, setMetalMakingCharges] = useState([]);
+  const [ledgerEntries, setLedgerEntries] = useState([]);
 
-  function updateMetalMakingCharge(metal, chargePerGramPaise, enabled) {
+  useEffect(() => {
+    if (!consoleState) return;
+    setCustomers(consoleState.customers ?? []);
+    setProducts(consoleState.products ?? []);
+    setRateRequests(consoleState.rateRequests ?? []);
+    const configuredCharges = consoleState.metalMakingCharges ?? [];
+    setMetalMakingCharges(SUPPORTED_METALS.map((metal) => configuredCharges.find((item) => item.metal === metal)
+      ?? { metal, chargePerGramPaise: 0, enabled: false, updatedAt: 'Not configured' }));
+    setLedgerEntries(consoleState.ledgerEntries ?? []);
+  }, [consoleState]);
+
+  async function persist(path, options) {
+    try {
+      const result = await apiRequest(path, options);
+      setPersistenceError('');
+      return result;
+    } catch (error) {
+      setPersistenceError(error.message);
+      return null;
+    }
+  }
+
+  async function updateMetalMakingCharge(metal, chargePerGramPaise, enabled) {
     if (activeRoleId !== 'SUPER_ADMIN') {
       return { success: false, message: 'Only Super Admin can configure metal making charges.' };
     }
-    if (!initialMetalMakingCharges.some((item) => item.metal === metal)) {
+    if (!SUPPORTED_METALS.includes(metal)) {
       return { success: false, message: 'Choose a supported metal.' };
     }
     if (!Number.isSafeInteger(chargePerGramPaise) || chargePerGramPaise < 0 || typeof enabled !== 'boolean') {
@@ -49,15 +51,20 @@ export function ManagementProvider() {
       year: 'numeric',
       timeZone: 'UTC',
     });
-    const nextCharges = metalMakingCharges.map((item) => item.metal === metal
-      ? { ...item, chargePerGramPaise, enabled, updatedAt }
-      : item);
     try {
-      window.localStorage.setItem(MAKING_CHARGE_STORAGE_KEY, JSON.stringify(nextCharges));
-    } catch {
-      return { success: false, message: 'Could not save demo making charges in this browser.' };
-    }
+      const saved = await persist(`/api/admin/console/making-charges/${encodeURIComponent(metal)}`, {
+        method: 'PUT',
+        body: { chargePerGramPaise, enabled },
+      });
+      if (!saved) return { success: false, message: 'Could not save the making charge.' };
+    } catch (error) { return { success: false, message: error.message }; }
+    const nextCharges = metalMakingCharges.some((item) => item.metal === metal)
+      ? metalMakingCharges.map((item) => item.metal === metal
+      ? { ...item, chargePerGramPaise, enabled, updatedAt }
+      : item)
+      : [...metalMakingCharges, { metal, chargePerGramPaise, enabled, updatedAt }];
     setMetalMakingCharges(nextCharges);
+    setPersistenceError('');
     recordAudit({
       action: 'Updated metal making charge',
       category: 'Products',
@@ -72,33 +79,57 @@ export function ManagementProvider() {
     products,
     rateRequests,
     metalMakingCharges,
+    ledgerEntries,
     updateMetalMakingCharge,
-    addCustomer: (customer) => {
-      setCustomers((items) => [customer, ...items]);
+    addCustomer: async (customer) => {
+      const saved = await persist('/api/admin/console/customers', { method: 'POST', body: customer });
+      if (!saved) return null;
+      setCustomers((items) => [saved, ...items]);
       recordAudit({ action: 'Created customer profile', category: 'Customers', target: customer.id, detail: 'Demo customer profile created with pending KYC.' });
+      return saved;
     },
-    updateCustomer: (id, updates) => {
+    updateCustomer: async (id, updates) => {
+      const saved = await persist(`/api/admin/console/customers/${encodeURIComponent(id)}`, { method: 'PATCH', body: updates });
+      if (!saved) return false;
       setCustomers((items) => items.map((item) => item.id === id ? { ...item, ...updates } : item));
       recordAudit({ action: 'Updated customer profile', category: 'Customers', target: id, detail: `Customer review fields updated: ${Object.keys(updates).join(', ')}.` });
+      return true;
     },
-    saveProduct: (product) => {
+    saveProduct: async (product) => {
+      const exists = products.some((item) => item.id === product.id);
+      const saved = await persist(exists ? `/api/admin/console/products/${encodeURIComponent(product.id)}` : '/api/admin/console/products', {
+        method: exists ? 'PUT' : 'POST',
+        body: product,
+      });
+      if (!saved) return false;
       setProducts((items) => {
         const exists = items.some((item) => item.id === product.id);
         return exists ? items.map((item) => item.id === product.id ? product : item) : [product, ...items];
       });
       recordAudit({ action: product.id && products.some((item) => item.id === product.id) ? 'Updated metal product' : 'Created metal product', category: 'Products', target: product.id, detail: 'Demo product catalog updated.' });
+      return true;
     },
-    toggleProduct: (id) => {
+    toggleProduct: async (id) => {
       const current = products.find((item) => item.id === id);
-      setProducts((items) => items.map((item) => item.id === id ? { ...item, status: item.status === 'Active' ? 'Inactive' : 'Active' } : item));
+      if (!current) return;
+      const updated = { ...current, status: current.status === 'Active' ? 'Inactive' : 'Active' };
+      const saved = await persist(`/api/admin/console/products/${encodeURIComponent(id)}`, { method: 'PUT', body: updated });
+      if (!saved) return false;
+      setProducts((items) => items.map((item) => item.id === id ? updated : item));
       if (current) recordAudit({ action: `${current.status === 'Active' ? 'Deactivated' : 'Activated'} metal product`, category: 'Products', target: id, detail: 'Demo product availability changed.' });
+      return true;
     },
-    addRateRequest: (request) => {
+    addRateRequest: async (request) => {
+      const saved = await persist('/api/admin/console/rate-requests', { method: 'POST', body: request });
+      if (!saved) return false;
       setRateRequests((items) => [request, ...items]);
       recordAudit({ action: 'Submitted rate change request', category: 'Rates', target: request.id, detail: `${request.metal} ${request.purity} rate submitted for review.` });
+      return true;
     },
-    reviewRateRequest: (id, status) => {
+    reviewRateRequest: async (id, status) => {
       const request = rateRequests.find((item) => item.id === id);
+      const saved = await persist(`/api/admin/console/rate-requests/${encodeURIComponent(id)}`, { method: 'PATCH', body: { status } });
+      if (!saved) return false;
       setRateRequests((items) => items.map((item) => item.id === id ? { ...item, status } : item));
       if (request) recordAudit({ action: `${status} rate request`, category: 'Rates', target: id, detail: `${request.metal} rate decision recorded in demo state.` });
       if (status === 'Approved' && request) {
@@ -108,8 +139,9 @@ export function ManagementProvider() {
             : item
         )));
       }
+      return true;
     },
-  }), [customers, products, rateRequests, metalMakingCharges, recordAudit, activeRoleId]);
+  }), [customers, products, rateRequests, metalMakingCharges, ledgerEntries, recordAudit, activeRoleId, setPersistenceError]);
 
   return <ManagementContext.Provider value={value}><Outlet /></ManagementContext.Provider>;
 }

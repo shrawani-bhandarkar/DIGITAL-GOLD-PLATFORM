@@ -2,7 +2,6 @@ import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import database from "../src/config/database";
-import { hashPassword } from "../src/modules/auth/credentials";
 
 const ADMIN_EMAIL = "admin@digitalgold.demo";
 const ADMIN_PASSWORD = "Admin123!";
@@ -16,14 +15,13 @@ async function seedAdmin(): Promise<void> {
     await database.query(statement);
   }
 
-  const passwordHash = await hashPassword(ADMIN_PASSWORD);
   await database.execute(
     `INSERT INTO admins (email, password, role)
      VALUES (?, ?, 'ADMIN')
      ON DUPLICATE KEY UPDATE
        role = VALUES(role),
        password = VALUES(password)`,
-    [ADMIN_EMAIL, passwordHash],
+    [ADMIN_EMAIL, ADMIN_PASSWORD],
   );
   console.log(`Seeded demo administrator ${ADMIN_EMAIL}.`);
 }

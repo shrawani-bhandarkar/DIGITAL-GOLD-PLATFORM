@@ -4,16 +4,13 @@ import { ArrowLeft, BadgeCheck, Mail, MapPin, Phone, ShieldCheck, UserRound } fr
 import PageHeader from '../components/PageHeader.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
-import { initialLedgerEntries } from '../data/managementData.js';
 import { useManagement } from '../context/ManagementContext.jsx';
-import { useOperations } from '../context/OperationsContext.jsx';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
-import { calculatePortfolio, calculateSellQuote, formatGrams, formatPaise, orderLedgerEntries, redemptionLedgerEntries, sumPaise } from '../utils/financial.js';
+import { calculatePortfolio, calculateSellQuote, formatGrams, formatPaise, sumPaise } from '../utils/financial.js';
 
 export default function CustomerDetailsPage() {
   const { customerId } = useParams();
-  const { customers, products, updateCustomer } = useManagement();
-  const { orders, redemptions } = useOperations();
+  const { customers, products, ledgerEntries, updateCustomer } = useManagement();
   const customer = customers.find((item) => item.id === customerId);
   const [confirmReject, setConfirmReject] = useState(false);
   const [confirmAccountChange, setConfirmAccountChange] = useState(false);
@@ -23,11 +20,7 @@ export default function CustomerDetailsPage() {
     return <section className="panel not-found-panel"><h1>Customer not found</h1><p>This customer record may have been removed.</p><Link className="button button-primary" to="/customers">Back to customers</Link></section>;
   }
 
-  const holdings = calculatePortfolio([
-    ...initialLedgerEntries,
-    ...orderLedgerEntries(orders, products),
-    ...redemptionLedgerEntries(redemptions, products),
-  ]).filter((holding) => holding.customerId === customer.id && holding.totalMilliGrams > 0)
+  const holdings = calculatePortfolio(ledgerEntries).filter((holding) => holding.customerId === customer.id && holding.totalMilliGrams > 0)
     .map((holding) => {
       const product = products.find((item) => item.id === holding.productId);
       const valuation = product && holding.totalMilliGrams > 0
@@ -50,7 +43,7 @@ export default function CustomerDetailsPage() {
   return (
     <>
       <PageHeader eyebrow={`CUSTOMER PROFILE · ${customer.id}`} title={customer.name} description="Review customer details and manage identity verification." actions={<Link to="/customers" className="button button-secondary"><ArrowLeft size={15} /> All customers</Link>} />
-      <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DEMO DATA</strong><span>Identity details displayed here are synthetic sample data.</span></div>
+      <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DATABASE</strong><span>Customer details and verification history are loaded from MySQL.</span></div>
       <div className="customer-detail-layout">
         <section className="panel customer-profile-card">
           <div className="customer-profile-heading"><span className="customer-profile-avatar">{customer.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><div><h2>{customer.name}</h2><p>{customer.id} · Joined {customer.joined}</p></div></div>

@@ -1,53 +1,71 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Outlet } from 'react-router-dom';
-import { DEFAULT_ROLES, DEFAULT_SETTINGS, INITIAL_AUDIT_EVENTS, PERMISSION_GROUPS } from '../data/adminData.js';
+import { DEFAULT_ROLES, DEFAULT_SETTINGS, PERMISSION_GROUPS } from '../data/adminData.js';
 import { useAuth } from './AuthContext.jsx';
+import { apiRequest } from '../services/apiClient.js';
 
 const AdminContext = createContext(null);
-const PERMISSION_STORAGE_KEY = 'digital-gold-demo-admin-permissions';
-let nextAuditId = 129;
-
-function readRoles() {
-  const roles = DEFAULT_ROLES.map((role) => ({ ...role, permissions: { ...role.permissions } }));
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(PERMISSION_STORAGE_KEY) ?? 'null');
-    if (stored && typeof stored === 'object') {
-      const admin = roles.find((role) => role.id === 'ADMIN');
-      admin.permissions = Object.fromEntries(PERMISSION_GROUPS.map(({ key }) => [key, false]));
-      for (const { key } of PERMISSION_GROUPS) {
-        if (typeof stored[key] === 'boolean') admin.permissions[key] = stored[key];
-      }
-    }
-  } catch {
-    // Invalid demo preferences are ignored; the configured defaults remain least-privileged.
-  }
-  return roles;
-}
 
 export function AdminProvider() {
   const { user } = useAuth();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  const [roles, setRoles] = useState(readRoles);
+  const [roles, setRoles] = useState(() => DEFAULT_ROLES.map((role) => ({ ...role, permissions: { ...role.permissions } })));
   const activeRoleId = user?.roleId;
-  const [auditEvents, setAuditEvents] = useState(INITIAL_AUDIT_EVENTS);
+  const [auditEvents, setAuditEvents] = useState([]);
+  const [persistenceError, setPersistenceError] = useState('');
+  const [consoleState, setConsoleState] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    apiRequest('/api/admin/console/state')
+      .then((state) => {
+        if (!mounted) return;
+        setConsoleState(state);
+        if (state.settings) setSettings(state.settings);
+        setAuditEvents(state.auditEvents ?? []);
+        if (state.roleCounts) {
+          setRoles((current) => current.map((role) => ({ ...role, users: Number(state.roleCounts[role.id] ?? role.users) })));
+        }
+        const permissions = Object.fromEntries((state.rolePermissions ?? [])
+          .filter((item) => item.role_id === 'ADMIN')
+          .map((item) => [item.permission_key, Boolean(item.allowed)]));
+        if (Object.keys(permissions).length) {
+          setRoles((current) => current.map((role) => role.id === 'ADMIN'
+            ? { ...role, permissions: { ...role.permissions, ...permissions } }
+            : role));
+        }
+      })
+      .catch((error) => { if (mounted) setPersistenceError(error.message); });
+    return () => { mounted = false; };
+  }, []);
 
   const recordAudit = useCallback((event) => {
     const actor = roles.find((role) => role.id === activeRoleId)?.name ?? 'Super Admin';
     const entry = {
-      id: `AUD-2026-${String(nextAuditId++).padStart(5, '0')}`,
+      id: `AUD-${Date.now()}-${globalThis.crypto.randomUUID().slice(0, 8)}`,
       timestamp: new Date().toISOString(),
       actor,
-      outcome: 'Simulated',
+      outcome: 'Completed',
       ...event,
     };
     setAuditEvents((items) => [entry, ...items]);
+    apiRequest('/api/admin/console/audit-events', { method: 'POST', body: entry })
+      .catch((error) => setPersistenceError(error.message));
   }, [activeRoleId, roles]);
 
-  const updateSettings = useCallback((nextSettings) => {
-    setSettings(nextSettings);
+  const updateSettings = useCallback(async (nextSettings) => {
+    try {
+      await apiRequest('/api/admin/console/settings', { method: 'PUT', body: nextSettings });
+      setSettings(nextSettings);
+      setPersistenceError('');
+      return { success: true };
+    } catch (error) {
+      setPersistenceError(error.message);
+      return { success: false, message: error.message };
+    }
   }, []);
 
-  const saveAdminPermissions = useCallback((permissions) => {
+  const saveAdminPermissions = useCallback(async (permissions) => {
     if (activeRoleId !== 'SUPER_ADMIN') return { success: false, message: 'Only Super Admin can configure Admin permissions.' };
     if (!PERMISSION_GROUPS.every(({ key }) => typeof permissions[key] === 'boolean')) {
       return { success: false, message: 'Every Admin permission must be explicitly enabled or disabled.' };
@@ -56,11 +74,13 @@ export function AdminProvider() {
       ? { ...role, permissions: Object.fromEntries(PERMISSION_GROUPS.map(({ key }) => [key, permissions[key]])) }
       : role);
     try {
-      window.localStorage.setItem(PERMISSION_STORAGE_KEY, JSON.stringify(nextRoles.find((role) => role.id === 'ADMIN').permissions));
-    } catch {
-      return { success: false, message: 'Could not save demo Admin permissions in this browser.' };
+      await apiRequest('/api/admin/console/roles/ADMIN/permissions', { method: 'PUT', body: permissions });
+    } catch (error) {
+      setPersistenceError(error.message);
+      return { success: false, message: error.message };
     }
     setRoles(nextRoles);
+    setPersistenceError('');
     return { success: true };
   }, [activeRoleId, roles]);
 
@@ -76,6 +96,9 @@ export function AdminProvider() {
     activeRoleId,
     hasPermission,
     auditEvents,
+    consoleState,
+    persistenceError,
+    setPersistenceError,
     updateSettings,
     saveAdminPermissions,
     recordAudit,

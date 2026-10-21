@@ -6,12 +6,12 @@ import DataTable from '../components/DataTable.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import StatCard from '../components/StatCard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
-import { activityItems, dashboardStats, metalRates, monthlyVolume } from '../data/dashboardData.js';
+import { dashboardStats, metalRates } from '../data/dashboardData.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { useManagement } from '../context/ManagementContext.jsx';
 import { useOperations } from '../context/OperationsContext.jsx';
-import { deriveDashboardMetrics } from '../utils/financial.js';
+import { deriveDashboardMetrics, mockOrderDateKey } from '../utils/financial.js';
 import { useAdmin } from '../context/AdminContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -19,12 +19,13 @@ export default function DashboardPage() {
   useDocumentTitle('Overview');
   const periods = ['7 days', '30 days', '90 days'];
   const [period, setPeriod] = useState('30 days');
-  const { customers, products } = useManagement();
+  const { customers, products, rateRequests } = useManagement();
   const { orders, payments, sips, redemptions } = useOperations();
-  const { activeRole, hasPermission } = useAdmin();
+  const { activeRole, hasPermission, auditEvents } = useAdmin();
   const { user } = useAuth();
   const { dashboardSearch = '' } = useOutletContext() ?? {};
-  const metrics = deriveDashboardMetrics({ customers, orders, payments, sips, redemptions });
+  const asOfDate = new Date().toISOString().slice(0, 10);
+  const metrics = deriveDashboardMetrics({ customers, orders, payments, sips, redemptions }, asOfDate);
   const displayedRates = metalRates.map((metal) => {
     const product = products.find((item) => item.metal.toLowerCase() === metal.key && item.status === 'Active'
       && (metal.key !== 'gold' || item.purity.includes('999.9')));
@@ -42,14 +43,14 @@ export default function DashboardPage() {
   };
   const stats = dashboardStats.filter((stat) => hasPermission(statPermissions[stat.label])).map((stat) => {
     const values = {
-      'Registered customers': [String(metrics.registeredCustomers), 'All sample customer profiles'],
-      'Verified customers': [String(metrics.verifiedCustomers), 'Verified sample profiles'],
-      'Buy / sell volume': [formatCurrency(metrics.completedAmountPaise / 100), 'Completed orders · 30-day sample'],
-      'Gross transaction value': [String(metrics.completedOrderCount), 'Unique completed orders · 30-day sample'],
+      'Registered customers': [String(metrics.registeredCustomers), 'All customer profiles'],
+      'Verified customers': [String(metrics.verifiedCustomers), 'Verified profiles'],
+      'Buy / sell volume': [formatCurrency(metrics.completedAmountPaise / 100), 'Completed orders · last 30 days'],
+      'Gross transaction value': [String(metrics.completedOrderCount), 'Unique completed orders · last 30 days'],
       'Pending payments': [String(metrics.pendingPayments), 'Pending or processing payment records'],
-      'Failed orders': [String(metrics.failedOrders), 'Failed orders · 30-day sample'],
-      'Pending redemptions': [String(metrics.pendingRedemptions), 'Awaiting review in demo state'],
-      'Active SIPs': [String(metrics.activeSips), 'Active sample plans · no debits scheduled'],
+      'Failed orders': [String(metrics.failedOrders), 'Failed orders · last 30 days'],
+      'Pending redemptions': [String(metrics.pendingRedemptions), 'Awaiting review'],
+      'Active SIPs': [String(metrics.activeSips), 'Active plans'],
     };
     return { ...stat, label: stat.label === 'Gross transaction value' ? 'Completed transactions' : stat.label, value: values[stat.label][0], detail: values[stat.label][1], change: '', trend: 'up' };
   });
@@ -71,23 +72,39 @@ export default function DashboardPage() {
     ).slice(0, 5);
   }, [dashboardSearch, orders, customers]);
   const attentionItems = [
-    { permission: 'customers', label: 'Customer verifications', detail: 'Identity checks awaiting review', count: '12', icon: <BadgeCheck size={17} />, tone: 'amber' },
-    { permission: 'products', label: 'Rate change approval', detail: 'Maker-checker review required', count: '2', icon: <RefreshCw size={17} />, tone: 'violet' },
-    { permission: 'finance', label: 'Payment exceptions', detail: 'Transactions needing investigation', count: '4', icon: <WalletCards size={17} />, tone: 'blue' },
-    { permission: 'fulfillment', label: 'Redemption requests', detail: 'Pending fulfilment review', count: '3', icon: <ShieldAlert size={17} />, tone: 'red' },
+    { permission: 'customers', label: 'Customer verifications', detail: 'Identity checks awaiting review', count: customers.filter((item) => item.kycStatus === 'Pending').length, icon: <BadgeCheck size={17} />, tone: 'amber' },
+    { permission: 'products', label: 'Rate change approval', detail: 'Rate requests awaiting review', count: rateRequests.filter((item) => item.status === 'Pending').length, icon: <RefreshCw size={17} />, tone: 'violet' },
+    { permission: 'finance', label: 'Payment exceptions', detail: 'Pending or failed payments', count: payments.filter((item) => ['Pending', 'Processing', 'Failed'].includes(item.status)).length, icon: <WalletCards size={17} />, tone: 'blue' },
+    { permission: 'fulfillment', label: 'Redemption requests', detail: 'Pending fulfilment review', count: redemptions.filter((item) => item.status === 'Pending').length, icon: <ShieldAlert size={17} />, tone: 'red' },
   ].filter((item) => hasPermission(item.permission));
-  const visibleActivityItems = activityItems.filter((item) => hasPermission(item.permission));
+  const visibleActivityItems = auditEvents.filter((item) => hasPermission(item.category === 'Customers' ? 'customers' : item.category === 'Products' || item.category === 'Rates' ? 'products' : item.category === 'Payments' || item.category === 'Refunds' ? 'finance' : item.category === 'Redemptions' || item.category === 'Gifts' ? 'fulfillment' : item.category === 'Administration' || item.category === 'Settings' ? 'administration' : 'audit')).slice(0, 6).map((item) => ({
+    ...item,
+    initials: item.actor.split(' ').map((part) => part[0]).join('').slice(0, 2),
+    time: new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(item.timestamp)),
+    tone: 'teal',
+  }));
   const chartData = useMemo(() => {
-    if (period === '7 days') return monthlyVolume.slice(-4);
-    if (period === '90 days') {
-      const extraDates = ['19 Jul', '27 Jul', '04 Aug', '12 Aug', '20 Aug', '28 Aug', '05 Sep'];
-      return [
-        ...monthlyVolume.slice(4).map((point, index) => ({ ...point, date: extraDates[index] ?? point.date })),
-        ...monthlyVolume.slice(0, 4),
-      ];
+    const dayCount = Number.parseInt(period, 10);
+    const bucketCount = period === '7 days' ? 7 : period === '30 days' ? 6 : 13;
+    const today = new Date(`${asOfDate}T00:00:00.000Z`);
+    const start = new Date(today);
+    start.setUTCDate(start.getUTCDate() - dayCount + 1);
+    const bucketSize = (dayCount * 24 * 60 * 60 * 1000) / bucketCount;
+    const buckets = Array.from({ length: bucketCount }, (_, index) => {
+      const date = new Date(start.getTime() + index * bucketSize);
+      return { date: new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' }).format(date), buy: 0, sell: 0 };
+    });
+    for (const order of orders) {
+      const orderDateKey = mockOrderDateKey(order.placedAt);
+      if (!orderDateKey) continue;
+      const orderDate = new Date(`${orderDateKey}T00:00:00.000Z`);
+      const offset = orderDate.getTime() - start.getTime();
+      if (offset < 0 || orderDate > today) continue;
+      const index = Math.min(bucketCount - 1, Math.floor(offset / bucketSize));
+      if (order.status === 'Completed') buckets[index][order.type.toLowerCase()] += Number(order.amount) / 100000;
     }
-    return monthlyVolume;
-  }, [period]);
+    return buckets;
+  }, [period, orders, asOfDate]);
   const columns = [
     { key: 'id', label: 'Transaction', render: (value, row) => <div className="transaction-id-cell"><span className={`transaction-type-icon ${row.type.toLowerCase()}`}>{row.type === 'Buy' ? <ArrowDownLeft size={15} /> : <ArrowUpRight size={15} />}</span><div><strong>{value}</strong><small>{row.date}</small></div></div> },
     { key: 'customer', label: 'Customer', render: (value, row) => <div className="customer-cell"><span className="customer-avatar">{row.initials}</span><div><strong>{value}</strong><small>{row.email}</small></div></div> },
@@ -99,13 +116,12 @@ export default function DashboardPage() {
   return (
     <>
       <PageHeader
-        eyebrow="THURSDAY, 15 OCTOBER 2026"
+        eyebrow={new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }).format(new Date())}
         title={`Good morning, ${activeRole?.name ?? user?.name ?? 'Admin'}`}
         description="Here’s what’s happening across your platform today."
         actions={<button className="button button-secondary dashboard-export" onClick={() => window.print()}><Download size={16} /> Export overview</button>}
       />
 
-      <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DEMO DATA</strong><span>All rates, customer figures, and financial amounts on this dashboard are sample values for preview only.</span></div>
 
       {stats.length > 0 && <section className="stat-grid" aria-label="Platform metrics">
         {stats.map((stat) => <StatCard key={stat.label} {...stat} icon={stat.icon} />)}
@@ -113,7 +129,7 @@ export default function DashboardPage() {
 
       {hasPermission('products') && <section className="rates-section" aria-label="Indicative metal rates">
         <div className="section-heading-row rate-heading">
-          <div><h2>Indicative metal rates</h2><p>Sample rates per gram · DEMO DATA</p></div>
+          <div><h2>Indicative metal rates</h2><p>Configured buy and sell rates per gram</p></div>
           <div className="rate-updated"><RefreshCw size={13} /> Updated 2 min ago</div>
         </div>
         <div className="rate-grid">
@@ -130,7 +146,7 @@ export default function DashboardPage() {
       <div className="dashboard-main-grid">
         {hasPermission('orders') && <section className="panel volume-panel">
           <div className="panel-heading">
-            <div><h2>Transaction volume</h2><p>Buy &amp; sell value over time · DEMO DATA</p></div>
+            <div><h2>Transaction volume</h2><p>Completed buy and sell order value from stored records</p></div>
             <div className="period-control" aria-label="Chart time period">{periods.map((item) => <button className={period === item ? 'selected' : ''} key={item} onClick={() => setPeriod(item)}>{item}</button>)}</div>
           </div>
           <div className="chart-legend"><span><i className="legend-dot buy-dot" /> Buy volume</span><span><i className="legend-dot sell-dot" /> Sell volume</span></div>
@@ -158,15 +174,15 @@ export default function DashboardPage() {
           <div className="approval-list">
             {attentionItems.map((item) => <div className="approval-item" key={item.permission}><span className={`approval-icon approval-${item.tone}`}>{item.icon}</span><div className="approval-copy"><strong>{item.label}</strong><span>{item.detail}</span></div><span className={`approval-count ${item.tone}-count`}>{item.count}</span></div>)}
           </div>
-          <div className="attention-footnote"><Clock3 size={14} /> Queue counts are simulated demo values.</div>
+          <div className="attention-footnote"><Clock3 size={14} /> Counts reflect current stored records.</div>
         </section>}
       </div>
 
       <div className="dashboard-bottom-grid">
         {hasPermission('orders') && <section className="panel transactions-panel">
-          <div className="panel-heading"><div><h2>Recent transactions</h2><p>Latest activity across your platform · DEMO DATA</p></div><span className="table-count-label">LATEST 5</span></div>
+          <div className="panel-heading"><div><h2>Recent transactions</h2><p>Latest stored orders</p></div><span className="table-count-label">LATEST 5</span></div>
           <DataTable columns={columns} rows={filteredTransactions} />
-          <div className="table-footnote"><span>{dashboardSearch.trim() ? `${filteredTransactions.length} matching sample transactions` : 'Showing recent sample transactions'}</span><span>As of 15 Oct 2026</span></div>
+          <div className="table-footnote"><span>{dashboardSearch.trim() ? `${filteredTransactions.length} matching transactions` : 'Showing recent transactions'}</span><span>As of {asOfDate}</span></div>
         </section>}
         {visibleActivityItems.length > 0 && <section className="panel activity-panel">
           <div className="panel-heading"><div><h2>Recent activity</h2><p>Latest admin and platform events</p></div><button className="icon-button subtle-icon" aria-label="More activity options"><CalendarDays size={17} /></button></div>
@@ -178,10 +194,10 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-          <div className="activity-footnote"><span className="activity-footnote-dot" /> Activity feed contains demo events</div>
+          <div className="activity-footnote"><span className="activity-footnote-dot" /> Activity feed from persisted audit events</div>
         </section>}
       </div>
-      <footer className="dashboard-footer"><span>Digital Gold Platform Admin</span><span>Dashboard is in demo mode · No live financial operations</span></footer>
+      <footer className="dashboard-footer"><span>Digital Gold Platform Admin</span><span>Financial actions require external payment and custody integrations.</span></footer>
     </>
   );
 }

@@ -23,7 +23,7 @@ function TestAuthProvider({ children, initialUser }) {
     authError: '',
     login: async (email, password) => {
       if (email !== 'admin@digitalgold.demo' || password !== 'Admin123!') {
-        throw new Error('Email or password is incorrect.');
+        throw new Error('Invalid email/username or password.');
       }
       const admin = {
         id: 2,

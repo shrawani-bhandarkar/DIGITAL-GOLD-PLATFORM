@@ -8,18 +8,17 @@ import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import SimulatedBanner from '../components/SimulatedBanner.jsx';
 import StatusTimeline from '../components/StatusTimeline.jsx';
-import { initialLedgerEntries } from '../data/managementData.js';
 import { useManagement } from '../context/ManagementContext.jsx';
 import { useOperations } from '../context/OperationsContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
-import { assertQuantityWithinConfiguredLimits, calculatePortfolio, calculateRedemptionQuote, formatGrams, formatPaise, orderLedgerEntries, productFeePolicy, redemptionLedgerEntries } from '../utils/financial.js';
+import { assertQuantityWithinConfiguredLimits, calculatePortfolio, calculateRedemptionQuote, formatGrams, formatPaise, productFeePolicy } from '../utils/financial.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 const PAGE_SIZE = 7;
 
 export default function RedemptionDeliveryPage() {
   useDocumentTitle('Redemption & delivery');
-  const { customers, products } = useManagement();
+  const { customers, products, ledgerEntries } = useManagement();
   const { orders, redemptions, updateRedemption, addRedemption } = useOperations();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All statuses');
@@ -34,11 +33,7 @@ export default function RedemptionDeliveryPage() {
   const [selectedProductId, setSelectedProductId] = useState('');
   const [enteredQuantity, setEnteredQuantity] = useState('');
   const [mode, setMode] = useState('Coin delivery');
-  const portfolio = calculatePortfolio([
-    ...initialLedgerEntries,
-    ...orderLedgerEntries(orders, products),
-    ...redemptionLedgerEntries(redemptions, products),
-  ]);
+  const portfolio = calculatePortfolio(ledgerEntries);
   const availableMilliGrams = portfolio.find((holding) => holding.customerId === selectedCustomerId && holding.productId === selectedProductId)?.availableMilliGrams ?? 0;
   const selectedProduct = products.find((product) => product.id === selectedProductId && product.status === 'Active');
   let quote = null;
@@ -74,7 +69,7 @@ export default function RedemptionDeliveryPage() {
   const rows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
 
-  function submitRedemption(event) {
+  async function submitRedemption(event) {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const customer = customers.find((item) => item.id === data.customerId);
@@ -105,11 +100,7 @@ export default function RedemptionDeliveryPage() {
       setFormError(error.message);
       return;
     }
-    const latestPortfolio = calculatePortfolio([
-      ...initialLedgerEntries,
-      ...orderLedgerEntries(orders, products),
-      ...redemptionLedgerEntries(redemptions, products),
-    ]);
+    const latestPortfolio = calculatePortfolio(ledgerEntries);
     const latestAvailable = latestPortfolio.find((holding) => holding.customerId === customer.id && holding.productId === product.id)?.availableMilliGrams ?? 0;
     if (calculation.quantityMilliGrams > latestAvailable) {
       setFormError(`Requested quantity cannot exceed the available ${formatGrams(latestAvailable)}.`);
@@ -129,7 +120,8 @@ export default function RedemptionDeliveryPage() {
       requestedAt: '15 Oct 2026, just now', status: 'Pending',
       timeline: [{ label: 'Redemption requested (simulated)', time: '15 Oct, just now', done: true }, { label: 'Review and fulfillment', time: 'Awaiting admin review', done: false }],
     };
-    addRedemption(newItem);
+    const saved = await addRedemption(newItem);
+    if (!saved) { setFormError('Could not save the redemption. Check the database connection and try again.'); return; }
     setFormOpen(false);
     setFormError('');
     setEnteredQuantity('');
@@ -163,7 +155,7 @@ export default function RedemptionDeliveryPage() {
   return (
     <>
       <PageHeader eyebrow="FULFILLMENT OPERATIONS" title="Redemption & delivery" description="Track customer metal redemptions, cash payouts, and physical delivery." actions={<button className="button button-primary" onClick={() => { setFormError(''); setEnteredQuantity(''); setSelectedCustomerId(''); setSelectedProductId(''); setMode('Coin delivery'); setFormOpen(true); }}><PackageCheck size={15} /> Create redemption</button>} />
-      <SimulatedBanner>Approvals, shipping milestones, and payout states are simulated. No metal, parcel, or money is moved.</SimulatedBanner>
+      <SimulatedBanner>Requests and status history are stored in MySQL. No metal, parcel, or money is moved.</SimulatedBanner>
       {operationNotice && <div className="operation-notice" role="status">{operationNotice}<button onClick={() => setOperationNotice('')} aria-label="Dismiss notice"><X size={14} /></button></div>}
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><PackageCheck size={17} /></span><div><span>Total requests</span><strong>{redemptions.length}</strong></div></article>
@@ -181,7 +173,7 @@ export default function RedemptionDeliveryPage() {
         <DataTable columns={columns} rows={rows} allRows={filtered} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
         <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} />
       </section>
-      <Modal open={formOpen} onClose={() => setFormOpen(false)} title="Create simulated redemption" description="Create a sample fulfillment request. No customer funds or metal will be transferred.">
+      <Modal open={formOpen} onClose={() => setFormOpen(false)} title="Create redemption" description="Create a stored fulfillment request. No customer funds or metal will be transferred.">
         <form className="management-form" onSubmit={submitRedemption}>
           <div className="form-grid">
             <label className="field-block form-grid-full"><span>Customer</span><select name="customerId" required value={selectedCustomerId} onChange={(event) => setSelectedCustomerId(event.target.value)}><option value="" disabled>Select a customer</option>{customers.filter((customer) => customer.status === 'Active' && customer.kycStatus === 'Verified').map((customer) => <option key={customer.id} value={customer.id}>{customer.name} · {customer.id}</option>)}</select></label>

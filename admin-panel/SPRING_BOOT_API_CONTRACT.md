@@ -1,9 +1,9 @@
 # Spring Boot integration contract: open decisions
 
-This document is a handoff checklist, not an implemented or agreed API. The
-admin panel currently uses in-memory mock records. It makes no calls to a
-Spring Boot service, and no routes, schemas, credentials, or database behavior
-are being asserted here as existing.
+This checklist describes decisions required only if replacing the current
+Node.js API with a Spring Boot service. The admin panel currently uses the
+Node.js API in `apps/api`, which reads and writes its operational records in
+MySQL. The checklist below is not the contract for that existing API.
 
 Before integration, the frontend and backend developers must agree on the
 public API base URL, endpoint paths and methods, authentication, authorization,
@@ -48,9 +48,9 @@ and status transitions. Do not expose credentials or secrets through Vite
   provider integration, human approval, and reconciliation. The admin frontend
   must not initiate them until those contracts are reviewed and implemented.
 
-## Current integration boundary
+## Spring Boot migration boundary
 
-`src/services/apiClient.js` is a transport-preparation helper only. No page
-calls it, no endpoint is wired, and setting `VITE_API_BASE_URL` does not connect
-the UI to a backend. Spring Boot integration remains blocked on the decisions
-above and on an agreed, reviewed API specification.
+The Node.js API integration is active; `src/services/apiClient.js` is used by
+the admin panel for authentication, operational data, settings, audit events,
+and report generation. A Spring Boot replacement remains blocked on the
+decisions above and an agreed, reviewed migration specification.

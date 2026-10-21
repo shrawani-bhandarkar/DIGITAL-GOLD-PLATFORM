@@ -38,7 +38,7 @@ export default function RateManagementPage() {
     if (page > pageCount) setPage(pageCount);
   }, [page, pageCount]);
 
-  function submitRequest(event) {
+  async function submitRequest(event) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
     const buyRate = Number(values.buyRate);
@@ -52,7 +52,7 @@ export default function RateManagementPage() {
       setFormError('Choose an available product before submitting the rate request.');
       return;
     }
-    addRateRequest({
+    const saved = await addRateRequest({
       id: `RATE-2026-${String(Date.now()).slice(-3)}`,
       metal: selectedProduct.metal,
       purity: selectedProduct.purity,
@@ -63,6 +63,7 @@ export default function RateManagementPage() {
       requestedBy: 'Super Admin',
       requestedAt: '15 Oct 2026, just now',
     });
+    if (!saved) { setFormError('Could not save the rate request. Check the database connection and try again.'); return; }
     setPage(1);
     setFormOpen(false);
     setFormError('');
@@ -91,7 +92,7 @@ export default function RateManagementPage() {
   return (
     <>
       <PageHeader eyebrow="PRICING OPERATIONS" title="Rate management" description="Review sample metal rates and control approval before publishing changes." actions={<button className="button button-primary" onClick={() => { setFormError(''); setFormOpen(true); }}><Plus size={15} /> Request rate change</button>} />
-      <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DEMO DATA</strong><span>Rates are illustrative only and are not connected to a live market or trading service.</span></div>
+      <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DATABASE</strong><span>Rate requests and product rates are stored in MySQL; no external market feed is connected.</span></div>
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><span className="stat-mini-dot" /></span><div><span>Active metal products</span><strong>{products.filter((product) => product.status === 'Active').length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-amber"><Clock3 size={17} /></span><div><span>Awaiting approval</span><strong>{pendingCount}</strong></div></article>

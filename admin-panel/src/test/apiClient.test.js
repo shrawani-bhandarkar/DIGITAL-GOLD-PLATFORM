@@ -52,13 +52,13 @@ describe('apiRequest preparation', () => {
 
   it('surfaces API-provided authentication errors', async () => {
     vi.stubEnv('VITE_API_BASE_URL', '');
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{"message":"Email or password is incorrect."}', {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"message":"Invalid email/username or password."}', {
       status: 401,
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
     const { apiRequest } = await import('../services/apiClient.js');
     await expect(apiRequest('/api/auth/login', { method: 'POST', body: { email: 'bad@example.com', password: 'bad' } }))
-      .rejects.toThrow('Email or password is incorrect.');
+      .rejects.toThrow('Invalid email/username or password.');
   });
 });

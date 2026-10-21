@@ -7,18 +7,17 @@ import Pagination from '../components/Pagination.jsx';
 import Modal from '../components/Modal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import SimulatedBanner from '../components/SimulatedBanner.jsx';
-import { initialLedgerEntries } from '../data/managementData.js';
 import { useManagement } from '../context/ManagementContext.jsx';
 import { useOperations } from '../context/OperationsContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
-import { assertQuantityWithinConfiguredLimits, calculateBuyQuote, calculatePortfolio, calculateSellQuote, formatGrams, formatPaise, orderLedgerEntries, productFeePolicy, redemptionLedgerEntries } from '../utils/financial.js';
+import { assertQuantityWithinConfiguredLimits, calculateBuyQuote, calculatePortfolio, calculateSellQuote, formatGrams, formatPaise, productFeePolicy } from '../utils/financial.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 const PAGE_SIZE = 7;
 
 export default function OrdersPage() {
   useDocumentTitle('Buy & sell orders');
-  const { customers, products, metalMakingCharges } = useManagement();
+  const { customers, products, metalMakingCharges, ledgerEntries } = useManagement();
   const { orders, redemptions, addOrder } = useOperations();
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('All types');
@@ -35,11 +34,7 @@ export default function OrdersPage() {
 
   const selectedProduct = products.find((item) => item.id === selectedProductId && item.status === 'Active');
   const selectedMakingCharge = metalMakingCharges.find((item) => item.metal === selectedProduct?.metal);
-  const portfolio = calculatePortfolio([
-    ...initialLedgerEntries,
-    ...orderLedgerEntries(orders, products),
-    ...redemptionLedgerEntries(redemptions, products),
-  ]);
+  const portfolio = calculatePortfolio(ledgerEntries);
   const availableMilliGrams = portfolio.find((holding) => holding.customerId === selectedCustomerId && holding.productId === selectedProductId)?.availableMilliGrams ?? 0;
   let quote = null;
   let quoteError = '';
@@ -86,7 +81,7 @@ export default function OrdersPage() {
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
 
-  function submitOrder(event) {
+  async function submitOrder(event) {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const customer = customers.find((item) => item.id === data.customerId);
@@ -125,11 +120,7 @@ export default function OrdersPage() {
       return;
     }
     if (orderType === 'Sell') {
-      const latestLedger = calculatePortfolio([
-        ...initialLedgerEntries,
-        ...orderLedgerEntries(orders, products),
-        ...redemptionLedgerEntries(redemptions, products),
-      ]);
+      const latestLedger = calculatePortfolio(ledgerEntries);
       const latestAvailable = latestLedger.find((holding) => holding.customerId === customer.id && holding.productId === product.id)?.availableMilliGrams ?? 0;
       if (calculation.quantityMilliGrams > latestAvailable) {
         setFormError(`Sell quantity cannot exceed the available ${formatGrams(latestAvailable)}.`);
@@ -141,7 +132,7 @@ export default function OrdersPage() {
     const chargePaise = calculation.chargePaise;
     const taxPaise = calculation.taxPaise;
     const totalPaise = orderType === 'Buy' ? calculation.totalPaise : calculation.netPaise;
-    addOrder({
+    const saved = await addOrder({
       id: `ORD-2026-${String(Date.now()).slice(-5)}`, customerId: customer.id, productId: product.id,
       customer: customer.name, type: orderType, metal: product.metal, purity: product.purity,
       quantity: calculation.quantityMilliGrams / 1000, amount: totalPaise / 100, baseAmount: baseAmountPaise / 100,
@@ -153,6 +144,7 @@ export default function OrdersPage() {
       status: 'Pending', placedAt: '15 Oct 2026, just now',
       timeline: [{ label: `${orderType} order created (simulated)`, time: '15 Oct, just now', done: true }, { label: 'Payment and fulfillment', time: 'Awaiting processing', done: false }],
     });
+    if (!saved) { setFormError('Could not save the order. Check the database connection and try again.'); return; }
     setPage(1);
     setFormOpen(false);
     setFormError('');
@@ -173,8 +165,8 @@ export default function OrdersPage() {
 
   return (
     <>
-      <PageHeader eyebrow="TRANSACTION OPERATIONS" title="Buy & sell orders" description="Review simulated customer orders, payment states, and metal fulfillment." actions={<div className="page-action-pair"><button className="button button-secondary" onClick={() => { setOrderType('Sell'); setBasis('quantity'); setEnteredValue(''); setSelectedCustomerId(''); setSelectedProductId(''); setFormError(''); setFormOpen(true); }}><ArrowUpRight size={15} /> New sell</button><button className="button button-primary" onClick={() => { setOrderType('Buy'); setBasis('amount'); setEnteredValue(''); setSelectedCustomerId(''); setSelectedProductId(''); setFormError(''); setFormOpen(true); }}><Plus size={15} /> New buy</button></div>} />
-      <SimulatedBanner />
+      <PageHeader eyebrow="TRANSACTION OPERATIONS" title="Buy & sell orders" description="Review persisted customer orders, pending payments, and metal ledger status." actions={<div className="page-action-pair"><button className="button button-secondary" onClick={() => { setOrderType('Sell'); setBasis('quantity'); setEnteredValue(''); setSelectedCustomerId(''); setSelectedProductId(''); setFormError(''); setFormOpen(true); }}><ArrowUpRight size={15} /> New sell</button><button className="button button-primary" onClick={() => { setOrderType('Buy'); setBasis('amount'); setEnteredValue(''); setSelectedCustomerId(''); setSelectedProductId(''); setFormError(''); setFormOpen(true); }}><Plus size={15} /> New buy</button></div>} />
+      <SimulatedBanner>Orders and payment intents are stored in MySQL. No gateway capture, payout, or custody movement is connected.</SimulatedBanner>
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><ArrowDownLeft size={17} /></span><div><span>Total orders</span><strong>{orders.length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-amber"><span className="stat-mini-dot" /></span><div><span>Awaiting processing</span><strong>{orders.filter((item) => item.status === 'Pending' || item.status === 'Processing').length}</strong></div></article>
@@ -192,7 +184,7 @@ export default function OrdersPage() {
         <DataTable columns={columns} rows={pageRows} allRows={filtered} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
         <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} />
       </section>
-      <Modal open={formOpen} onClose={() => setFormOpen(false)} title={`Create simulated ${orderType.toLowerCase()} order`} description="This creates a demo record only. It will not initiate payment or transfer metal.">
+      <Modal open={formOpen} onClose={() => setFormOpen(false)} title={`Create ${orderType.toLowerCase()} order`} description="Creates a stored order and pending payment intent. External payment and custody actions are not connected.">
         <form className="management-form" onSubmit={submitOrder}>
           <div className="form-grid">
             <label className="field-block form-grid-full"><span>Customer</span><select name="customerId" required value={selectedCustomerId} onChange={(event) => setSelectedCustomerId(event.target.value)}><option value="" disabled>Select a customer</option>{customers.filter((customer) => customer.status === 'Active').map((customer) => <option value={customer.id} key={customer.id}>{customer.name} · {customer.id}</option>)}</select></label>

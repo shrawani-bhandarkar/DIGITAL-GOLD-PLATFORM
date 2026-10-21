@@ -3,7 +3,6 @@ import { Download, Search, ScrollText } from 'lucide-react';
 import DataTable from '../components/DataTable.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Pagination from '../components/Pagination.jsx';
-import SimulatedBanner from '../components/SimulatedBanner.jsx';
 import Modal from '../components/Modal.jsx';
 import { useAdmin } from '../context/AdminContext.jsx';
 import { dateRangeMatches, downloadCsv } from '../utils/csvExport.js';
@@ -73,12 +72,11 @@ export default function AuditLogsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="ADMINISTRATION · LOCAL DEMO HISTORY" title="Audit logs" description="Inspect sample history and actions recorded during this browser session." actions={<button className="button button-secondary" onClick={exportAuditLogs} disabled={invalidRange || filtered.length === 0}><Download size={15} /> Export filtered CSV</button>} />
-      <SimulatedBanner>Audit events are held in memory and can be cleared by reloading. They are not tamper-proof, durable, or a substitute for server-side security audit logging.</SimulatedBanner>
+      <PageHeader eyebrow="ADMINISTRATION" title="Audit logs" description="Inspect persisted administrator actions and outcomes." actions={<button className="button button-secondary" onClick={exportAuditLogs} disabled={invalidRange || filtered.length === 0}><Download size={15} /> Export filtered CSV</button>} />
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><ScrollText size={17} /></span><div><span>Filtered events</span><strong>{invalidRange ? 0 : filtered.length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-blue"><span className="stat-mini-dot" /></span><div><span>Categories represented</span><strong>{new Set(filtered.map((event) => event.category)).size}</strong></div></article>
-        <article><span className="management-stat-icon stat-icon-amber"><span className="stat-mini-dot" /></span><div><span>Current session events</span><strong>{auditEvents.length - 7}</strong></div></article>
+        <article><span className="management-stat-icon stat-icon-amber"><span className="stat-mini-dot" /></span><div><span>Stored events</span><strong>{auditEvents.length}</strong></div></article>
       </section>
       <section className="panel management-panel">
         <div className="management-toolbar">

@@ -1,6 +1,5 @@
 import "dotenv/config";
 import database from "../src/config/database";
-import { hashPassword } from "../src/modules/auth/credentials";
 
 async function createAdmin(): Promise<void> {
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
@@ -13,11 +12,10 @@ async function createAdmin(): Promise<void> {
     throw new Error("Set ADMIN_PASSWORD to a unique password of at least 12 characters.");
   }
 
-  const passwordHash = await hashPassword(password);
   await database.execute(
     `INSERT INTO admins (email, password, role)
      VALUES (?, ?, 'ADMIN')`,
-    [email, passwordHash],
+    [email, password],
   );
   console.log(`Created administrator account for ${email}.`);
 }

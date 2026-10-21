@@ -58,7 +58,7 @@ export default function SipManagementPage() {
     plannedTotal = '';
   }
 
-  function submitSip(event) {
+  async function submitSip(event) {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const customer = customers.find((item) => item.id === data.customerId);
@@ -81,7 +81,7 @@ export default function SipManagementPage() {
       setFormError(`Installment must be between ${formatCurrency(product.minOrder)} and ${formatCurrency(product.maxOrder)}.`);
       return;
     }
-    addSip({
+    const saved = await addSip({
       id: `SIP-2026-${String(Date.now()).slice(-5)}`, customerId: customer.id,
       customer: customer.name, metal: product.metal, purity: product.purity,
       amount: amountPaise / 100, frequency: data.frequency, nextDebit: dates[0], scheduleDates: dates,
@@ -89,6 +89,7 @@ export default function SipManagementPage() {
       started: '15 Oct 2026', installments: `0 of ${installments}`, status: 'Active',
       timeline: [{ label: 'SIP plan created (simulated)', time: '15 Oct, just now', done: true }, { label: 'First installment scheduled', time: data.nextDebit, done: false }],
     });
+    if (!saved) { setFormError('Could not save the SIP plan. Check the database connection and try again.'); return; }
     setPage(1);
     setFormOpen(false);
     setFormError('');
@@ -109,7 +110,7 @@ export default function SipManagementPage() {
   return (
     <>
       <PageHeader eyebrow="SAVINGS PLANS" title="SIP management" description="Monitor recurring savings plans and manage their simulated lifecycle." actions={<button className="button button-primary" onClick={() => { setFormError(''); setFrequency('Monthly'); setFirstDebitDate('2026-10-20'); setInstallmentCount('12'); setAmountInput(''); setFormOpen(true); }}><Plus size={15} /> Create SIP</button>} />
-      <SimulatedBanner>SIP plans, installment schedules, and status actions are sample data only. No debit or investment is performed.</SimulatedBanner>
+      <SimulatedBanner>SIP plans and schedules are stored in MySQL. Scheduled debits and investments are not performed.</SimulatedBanner>
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><CalendarClock size={17} /></span><div><span>Total SIP plans</span><strong>{sips.length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-blue"><CirclePlay size={17} /></span><div><span>Active plans</span><strong>{sips.filter((sip) => sip.status === 'Active').length}</strong></div></article>
@@ -126,7 +127,7 @@ export default function SipManagementPage() {
         <DataTable columns={columns} rows={rows} allRows={filtered} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
         <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} />
       </section>
-      <Modal open={formOpen} onClose={() => setFormOpen(false)} title="Create simulated SIP" description="Create a demo recurring plan; scheduled installments will not be charged.">
+      <Modal open={formOpen} onClose={() => setFormOpen(false)} title="Create SIP" description="Create a stored recurring plan; scheduled installments will not be charged by this API.">
         <form className="management-form" onSubmit={submitSip}>
           <div className="form-grid">
             <label className="field-block form-grid-full"><span>Customer</span><select name="customerId" required defaultValue=""><option value="" disabled>Select a customer</option>{customers.filter((customer) => customer.status === 'Active' && customer.kycStatus === 'Verified').map((customer) => <option key={customer.id} value={customer.id}>{customer.name} · {customer.id}</option>)}</select></label>

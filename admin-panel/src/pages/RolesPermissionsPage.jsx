@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, KeyRound, LockKeyhole, Save, ShieldCheck, X } from 'lucide-react';
 import PageHeader from '../components/PageHeader.jsx';
-import SimulatedBanner from '../components/SimulatedBanner.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { useAdmin } from '../context/AdminContext.jsx';
 import { PERMISSION_GROUPS } from '../data/adminData.js';
@@ -28,9 +27,9 @@ export default function RolesPermissionsPage() {
     if (adminRole) setDraftPermissions({ ...adminRole.permissions });
   }
 
-  function saveChanges() {
+  async function saveChanges() {
     const changed = PERMISSION_GROUPS.filter(({ key }) => draftPermissions[key] !== adminRole.permissions[key]);
-    const result = saveAdminPermissions(draftPermissions);
+    const result = await saveAdminPermissions(draftPermissions);
     if (!result.success) {
       setSaveError(result.message);
       setConfirmSave(false);
@@ -55,8 +54,7 @@ export default function RolesPermissionsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="ADMINISTRATION · DEMO CONFIGURATION" title="Roles & permissions" description="Manage the two supported Admin Panel roles and review their configured access." />
-      <SimulatedBanner>Role permissions are frontend demo state only. They do not provide production authorization; enforce all role access on the backend.</SimulatedBanner>
+      <PageHeader eyebrow="ADMINISTRATION" title="Roles & permissions" description="Manage Admin permissions enforced by the API." />
       {saveError && <p className="form-feedback" role="alert">{saveError}</p>}
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><KeyRound size={17} /></span><div><span>Configured roles</span><strong>{roles.length}</strong></div></article>

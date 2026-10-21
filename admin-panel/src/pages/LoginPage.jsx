@@ -4,6 +4,16 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
+const PASSWORD_REQUIREMENTS_MESSAGE = 'Password must be at least 8 characters and include at least one uppercase letter, one lowercase letter, one number, and one special character.';
+
+function isValidPassword(password) {
+  return password.length >= 8
+    && /[A-Z]/.test(password)
+    && /[a-z]/.test(password)
+    && /[0-9]/.test(password)
+    && /[^A-Za-z0-9]/.test(password);
+}
+
 export default function LoginPage() {
   useDocumentTitle('Sign in');
   const [email, setEmail] = useState('');
@@ -16,12 +26,12 @@ export default function LoginPage() {
   const navigate = useNavigate();
 
   const emailError = touched.email && (!email.trim() ? 'Email is required.' : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ? 'Enter a valid email address.' : '');
-  const passwordError = touched.password && !password ? 'Password is required.' : '';
+  const passwordError = touched.password && !isValidPassword(password) ? PASSWORD_REQUIREMENTS_MESSAGE : '';
 
   async function submit(event) {
     event.preventDefault();
     setTouched({ email: true, password: true });
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || !password) return;
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || !isValidPassword(password)) return;
     setIsSubmitting(true);
     try {
       await login(email.trim(), password);
