@@ -1,0 +1,23 @@
+// Proposed routes only. Confirm paths, methods and schemas with the API owner.
+export const apiRoutes = {
+  requestOtp: { method: 'POST', path: '/api/customer/auth/otp/request' },
+  verifyOtp: { method: 'POST', path: '/api/customer/auth/otp/verify' },
+  logout: { method: 'POST', path: '/api/customer/auth/logout' },
+  profile: { method: 'GET', path: '/api/customer/me' },
+  rates: { method: 'GET', path: '/api/market/rates' },
+  portfolio: { method: 'GET', path: '/api/customer/portfolio' },
+  transactions: { method: 'GET', path: '/api/customer/transactions' },
+  transactionDetail: { method: 'GET', path: '/api/customer/transactions/{transactionId}' },
+  purchaseQuote: { method: 'POST', path: '/api/customer/orders/purchase/quote' },
+  purchaseSubmit: { method: 'POST', path: '/api/customer/orders/purchase' },
+  sellQuote: { method: 'POST', path: '/api/customer/orders/sell/quote' },
+  sellSubmit: { method: 'POST', path: '/api/customer/orders/sell' },
+  redemptionQuote: { method: 'POST', path: '/api/customer/redemptions/quote' },
+  redemptionSubmit: { method: 'POST', path: '/api/customer/redemptions' },
+  sips: { method: 'GET', path: '/api/customer/sips' },
+  sipCreate: { method: 'POST', path: '/api/customer/sips' },
+  sipCancel: { method: 'POST', path: '/api/customer/sips/{sipId}/cancel' },
+  giftQuote: { method: 'POST', path: '/api/customer/gifts/quote' },
+  giftSubmit: { method: 'POST', path: '/api/customer/gifts' },
+  notifications: { method: 'GET', path: '/api/customer/notifications' },
+};
