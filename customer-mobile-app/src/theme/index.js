@@ -1,29 +1,35 @@
 import { StyleSheet } from 'react-native';
 
 export const colors = {
-  primary: '#176B50',
-  primaryDark: '#145A43',
-  secondary: '#2D8062',
-  gold: '#D6B45B',
+  primary: '#064E3B',
+  primaryDark: '#043D2E',
+  secondary: '#0F766E',
+  gold: '#D4AF6A',
   goldDark: '#806A2F',
-  goldLight: '#F7F0DC',
-  background: '#F7F5EF',
+  goldLight: '#F8F0DD',
+  goldBorder: '#E8D8B4',
+  background: '#F8F7F2',
+  mutedSurface: '#EEF2EF',
+  softTeal: '#EAF2F0',
+  softChampagne: '#F5F1E8',
+  silverSurface: '#EFF0F0',
+  platinumSurface: '#E9ECEB',
   surface: '#FFFFFF',
-  text: '#263A2F',
-  muted: '#747A73',
-  border: '#E5E7DF',
-  success: '#23834D',
-  successBackground: '#E5F0E8',
-  error: '#C74848',
-  errorBackground: '#FDECEF',
-  lightMint: '#E5F0E8',
-  onPrimary: '#E5F0E8',
+  text: '#18221F',
+  muted: '#68736D',
+  border: '#E5E9E4',
+  success: '#16834A',
+  successBackground: '#EAF4EE',
+  error: '#C0392B',
+  errorBackground: '#FCECE9',
+  lightMint: '#E8F1EC',
+  onPrimary: '#E5EEE9',
   primaryDivider: '#477D68',
-  warningBackground: '#FBF4E4',
-  warningBorder: '#E9DDBB',
-  warningText: '#6A592F',
-  disabledBackground: '#E6E8E2',
-  disabledText: '#92968F',
+  warningBackground: '#F8F0DD',
+  warningBorder: '#E8D8B4',
+  warningText: '#66532B',
+  disabledBackground: '#E6EAE6',
+  disabledText: '#68736D',
 };
 
 export const spacing = {
@@ -33,21 +39,37 @@ export const spacing = {
   lg: 16,
   xl: 20,
   xxl: 24,
+  xxxl: 32,
   page: 20,
+};
+
+export const typography = {
+  screenTitle: 26,
+  sectionTitle: 17,
+  body: 14,
+  caption: 12,
+  financialFigure: 30,
+};
+
+export const radii = {
+  small: 10,
+  medium: 14,
+  large: 20,
+  pill: 999,
 };
 
 export const commonStyles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 18,
+    borderRadius: radii.large,
     borderWidth: 1,
   },
   shadow: {
-    elevation: 2,
-    shadowColor: '#263A2F',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
+    elevation: 1,
+    shadowColor: colors.primaryDark,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
   },
 });

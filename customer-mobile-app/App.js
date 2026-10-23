@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   BackHandler,
   Keyboard,
   KeyboardAvoidingView,
@@ -18,7 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import { apiConfig } from './src/config/apiConfig';
-import { Button, Brand, Card, ChoiceRow, DigiGoldHeader, DemoBadge, EmptyState, Field, Notice, SectionTitle } from './src/components/UI';
+import { Button, Brand, Card, ChoiceRow, DigiGoldHeader, DemoBadge, EmptyState, ErrorState, Field, LoadingState, Notice, SectionTitle, StatusBadge } from './src/components/UI';
 import { demoNotifications, demoPortfolio, demoProfile, demoRates } from './src/services/demoData';
 import { logout, requestOtp, verifyOtp } from './src/services/authService';
 import { setUnauthorizedHandler } from './src/services/apiClient';
@@ -40,21 +41,21 @@ const tabs = [
 ];
 
 const actions = [
-  { id: 'buy', title: 'Buy', detail: 'Buy gold, silver or platinum', icon: 'shopping-cart' },
-  { id: 'sell', title: 'Sell', detail: 'Sell your eligible metal holdings', icon: 'swap-horiz' },
+  { id: 'buy', title: 'Buy', detail: 'Buy gold, silver or platinum', icon: 'shopping-bag' },
+  { id: 'sell', title: 'Sell', detail: 'Sell your eligible metal holdings', icon: 'account-balance-wallet' },
   { id: 'redeem', title: 'Redeem', detail: 'Redeem eligible metals', icon: 'redeem' },
-  { id: 'sip', title: 'Start SIP', detail: 'Invest monthly in gold, silver or platinum', icon: 'calendar-month' },
-  { id: 'gift', title: 'Gift Gold', detail: 'Send gold to your loved ones', icon: 'card-giftcard' },
-  { id: 'portfolio', title: 'My Savings', detail: 'View your holdings and portfolio value', icon: 'account-balance-wallet' },
+  { id: 'sip', title: 'Start SIP', detail: 'Plan regular investments in precious metals', icon: 'event-repeat' },
+  { id: 'gift', title: 'Gift Gold', detail: 'Send eligible precious metals to your loved ones', icon: 'card-giftcard' },
+  { id: 'portfolio', title: 'My Saving', detail: 'View your holdings and portfolio value', icon: 'savings' },
 ];
 
 const actionColors = {
-  buy: { background: '#FFF0C2', accent: '#E9A400', iconInk: '#513600', ink: '#513600', arrowInk: '#513600' },
-  sell: { background: '#D9F6EB', accent: '#0A8B65', iconInk: colors.surface, ink: '#07563F' },
-  redeem: { background: '#DDEBFF', accent: '#2D68CC', iconInk: colors.surface, ink: '#173D90' },
-  sip: { background: '#EEE5FF', accent: '#8851E8', iconInk: colors.surface, ink: '#432278' },
-  gift: { background: '#FFE1EF', accent: '#C83278', iconInk: colors.surface, ink: '#79204C' },
-  portfolio: { background: '#DDF8E8', accent: '#0B8062', iconInk: colors.surface, ink: '#07563F' },
+  buy: { background: '#FFF3CC', iconInk: '#D4A017' },
+  sell: { background: '#E5F7ED', iconInk: '#159957' },
+  redeem: { background: '#F0EAFE', iconInk: '#805AD5' },
+  sip: { background: '#E6F1FF', iconInk: '#2878D0' },
+  gift: { background: '#FCE7F3', iconInk: '#D9468F' },
+  portfolio: { background: '#DDF7F3', iconInk: '#0F9D91' },
 };
 
 const transactionTypes = [
@@ -376,35 +377,29 @@ function ExploreActionCard({ action, onPress, unavailable, disabled = false, wid
       onPress={onPress}
       style={({ pressed }) => [
         styles.actionCard,
-        { backgroundColor: tone.background, borderColor: tone.accent, width },
+        { width },
         disabled && styles.actionCardDisabled,
         pressed && styles.actionCardPressed,
       ]}
     >
-      <View style={[styles.actionArt, { backgroundColor: tone.accent }]}>
-        <View style={styles.actionArtGlow} />
+      <View style={[styles.actionArt, { backgroundColor: tone.background }]}>
         <MaterialIcons
           name={action.icon}
-          size={37}
+          size={23}
           color={tone.iconInk}
         />
-        {action.id === 'buy' ? (
-          <View style={styles.actionCoin}>
-            <Text style={styles.actionCoinText}>₹</Text>
-          </View>
-        ) : null}
       </View>
+      <Text style={styles.actionTitle} numberOfLines={1}>
+        {action.title}
+      </Text>
       <View style={styles.actionCardFooter}>
         <View style={styles.actionCardCopy}>
-          <Text style={[styles.actionTitle, { color: tone.ink }]}>
-            {action.title}
-          </Text>
-          <Text style={[styles.actionDetail, { color: tone.ink }]} numberOfLines={2}>
+          <Text style={styles.actionDetail} numberOfLines={2}>
             {disabled ? 'Unavailable in backend mode' : unavailable ? 'No demo holdings yet · tap for details' : action.detail}
           </Text>
         </View>
-        <View style={[styles.actionArrow, { backgroundColor: tone.accent }]}>
-          <Text style={[styles.actionArrowText, { color: tone.arrowInk || colors.surface }]}>›</Text>
+        <View style={styles.actionArrow}>
+          <Text style={styles.actionArrowText}>›</Text>
         </View>
       </View>
     </Pressable>
@@ -414,6 +409,7 @@ function ExploreActionCard({ action, onPress, unavailable, disabled = false, wid
 function PortfolioCard({ value, loading = false, empty = false }) {
   return (
     <View style={styles.portfolioCard}>
+      <View style={styles.portfolioAccent} />
       <Text style={styles.portfolioEyebrow}>TOTAL PORTFOLIO VALUE</Text>
       {apiConfig.mode === 'demo' ? <DemoBadge label="DEMO ESTIMATE" /> : null}
       {loading ? (
@@ -443,6 +439,10 @@ function HomeScreen({
   onSupport,
   onSelectTab,
   onRateSelect,
+  onQuickBuyLayout,
+  quickBuyMetalId,
+  quickBuyExpanded,
+  onQuickBuyToggle,
   rates,
   ratesLoading,
   ratesError,
@@ -458,10 +458,8 @@ function HomeScreen({
   const columnCount = screenWidth >= 600 ? 3 : 2;
   const columnGap = 10;
   const actionWidth = (contentWidth - columnGap * (columnCount - 1)) / columnCount;
-  const showRateGrid = screenWidth >= 390;
-  const rateCardWidth = showRateGrid
-    ? (contentWidth - 16) / 3
-    : Math.min(140, Math.max(120, screenWidth - 60));
+  const rateGap = 8;
+  const rateCardWidth = Math.floor((contentWidth - rateGap * 2) / 3);
   return (
     <>
       <DigiGoldHeader
@@ -475,54 +473,42 @@ function HomeScreen({
         <Text style={styles.ratesDisclosure}>Illustrative demo rates · not live market prices</Text>
       ) : null}
       {ratesLoading ? (
-        <View style={styles.dataLoading}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.dataLoadingText}>Loading metal rates…</Text>
-        </View>
+        <LoadingState label="Loading metal rates…" />
       ) : ratesError ? (
-        <View style={styles.dataError}>
-          <Text style={styles.dataErrorText}>{ratesError}</Text>
-          <TouchableOpacity accessibilityRole="button" onPress={onRetryRates} style={styles.retryLink}>
-            <Text style={styles.retryLinkText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : showRateGrid ? (
-        <View style={styles.rateGrid}>
+        <ErrorState message={ratesError} onRetry={onRetryRates} />
+      ) : (
+        <View style={[styles.rateGrid, { columnGap: rateGap }]}>
           {rates.map((rate) => (
             <MetalRateCard
               key={rate.id}
               rate={rate}
               compact
+              selected={rate.id === quickBuyMetalId}
               onPress={() => onRateSelect(rate)}
               width={rateCardWidth}
             />
           ))}
         </View>
-      ) : (
-        <>
-          <ScrollView
-            horizontal
-            nestedScrollEnabled
-            showsHorizontalScrollIndicator
-            style={styles.ratesScroller}
-            contentContainerStyle={styles.rateRow}
-          >
-            {rates.map((rate) => (
-              <MetalRateCard
-                key={rate.id}
-                rate={rate}
-                onPress={() => onRateSelect(rate)}
-                width={rateCardWidth}
-              />
-            ))}
-          </ScrollView>
-          <Text style={styles.ratesSwipeHint}>Swipe to view all metal rates →</Text>
-        </>
       )}
       {!ratesLoading && !ratesError && rates.length === 0 ? (
         <EmptyState title="Rates unavailable" body="No current metal rates are available." symbol="◈" />
       ) : null}
+      <View onLayout={onQuickBuyLayout}>
+        <QuickBuyCalculator
+          rates={rates}
+          ratesLoading={ratesLoading}
+          ratesError={ratesError}
+          selectedMetalId={quickBuyMetalId}
+          expanded={quickBuyExpanded}
+          onToggle={onQuickBuyToggle}
+          onBuy={(draft) => onQuickBuy(draft)}
+          purchaseAvailable={apiConfig.mode === 'demo'}
+        />
+      </View>
       <SectionTitle title="Explore DigiGold" />
+      <Text style={styles.exploreSectionDescription}>
+        Discover a smarter way to own and manage precious metals.
+      </Text>
       {apiConfig.mode === 'backend' ? (
         <Notice type="warning" style={styles.sectionNotice}>
           Buy, sell, SIP, redemption and gift actions remain disabled until their backend transaction flow is connected.
@@ -534,19 +520,11 @@ function HomeScreen({
             key={action.id}
             action={action}
             width={actionWidth}
-            disabled={apiConfig.mode === 'backend'}
+            disabled={apiConfig.mode === 'backend' && action.id !== 'portfolio'}
             onPress={() => onOpenAction(action.id)}
           />
         ))}
       </View>
-
-      <QuickBuyCalculator
-        rates={rates}
-        ratesLoading={ratesLoading}
-        ratesError={ratesError}
-        onBuy={(draft) => onQuickBuy(draft)}
-        purchaseAvailable={apiConfig.mode === 'demo'}
-      />
 
       <RecentActivity
         activities={activities}
@@ -640,7 +618,7 @@ function RecentActivityRow({ activity, compact = false }) {
   );
 }
 
-function MetalRateCard({ rate, onPress, width, compact = false }) {
+function MetalRateCard({ rate, onPress, width, compact = false, selected = false }) {
   const availableRate = Number.isFinite(rate.ratePerGram) && rate.ratePerGram > 0;
   const metalIcon = rate.id === 'gold'
     ? 'monetization-on'
@@ -653,7 +631,9 @@ function MetalRateCard({ rate, onPress, width, compact = false }) {
         <MaterialIcons name={metalIcon} size={compact ? 23 : 28} color={rate.id === 'gold' ? colors.goldDark : rate.id === 'silver' ? colors.muted : colors.primary} />
       </View>
       <Text style={[styles.rateName, compact && styles.rateNameCompact]} numberOfLines={1}>{rate.metal}</Text>
-      {rate.purity ? <Text style={[styles.ratePurity, compact && styles.rateTextCompact]} numberOfLines={1}>Purity {rate.purity}</Text> : null}
+      <Text style={[styles.ratePurity, compact && styles.rateTextCompact]} numberOfLines={1}>
+        {rate.purity ? `Purity ${rate.purity}` : 'Purity unavailable'}
+      </Text>
       <Text style={[styles.ratePrice, compact && styles.ratePriceCompact]} numberOfLines={1}>
         {availableRate ? formatINR(rate.ratePerGram) : 'Rate unavailable'}
       </Text>
@@ -671,15 +651,19 @@ function MetalRateCard({ rate, onPress, width, compact = false }) {
     compact ? { marginRight: 0 } : null,
   ];
   return onPress ? (
-    <TouchableOpacity
+    <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${rate.metal}, ${availableRate ? `sample rate ${formatINR(rate.ratePerGram)} per gram` : 'rate unavailable'}. Open details.`}
-      activeOpacity={0.86}
+      accessibilityLabel={`${rate.metal}, ${availableRate ? `${apiConfig.mode === 'demo' ? 'illustrative demo' : 'current'} rate ${formatINR(rate.ratePerGram)} per gram` : 'rate unavailable'}. Open Quick Buy with this metal selected.`}
+      accessibilityState={{ selected }}
       onPress={onPress}
-      style={cardStyle}
+      style={({ pressed }) => [
+        cardStyle,
+        selected && styles.metalRateCardSelected,
+        pressed && styles.metalRateCardPressed,
+      ]}
     >
       {content}
-    </TouchableOpacity>
+    </Pressable>
   ) : (
     <View style={cardStyle}>{content}</View>
   );
@@ -746,24 +730,26 @@ function QuickBuyCalculator({
   rates,
   ratesLoading,
   ratesError,
+  selectedMetalId,
+  expanded,
+  onToggle,
   onBuy,
   purchaseAvailable,
 }) {
-  const [metalId, setMetalId] = useState('gold');
   const [mode, setMode] = useState('amount');
   const [valuesByMode, setValuesByMode] = useState({ amount: '', grams: '' });
   const [validationError, setValidationError] = useState('');
   const [purchaseError, setPurchaseError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const value = valuesByMode[mode];
-  const selectedRate = rates.find((rate) => rate.id === metalId);
+  const selectedRate = rates.find((rate) => rate.id === selectedMetalId);
   const rateAvailable = Number.isFinite(selectedRate?.ratePerGram) && selectedRate.ratePerGram > 0;
   let estimate = null;
   let estimateError = '';
   if (value.trim() && rateAvailable) {
     try {
       estimate = calculateBuyEstimate({
-        metalId,
+        metalId: selectedMetalId,
         mode,
         value,
         ratePerGram: selectedRate.ratePerGram,
@@ -773,11 +759,6 @@ function QuickBuyCalculator({
     }
   }
 
-  const updateMetal = (next) => {
-    setMetalId(next);
-    setValidationError('');
-    setPurchaseError('');
-  };
   const updateValue = (next) => {
     setValuesByMode((current) => ({ ...current, [mode]: sanitizeDecimalInput(next) }));
     setValidationError('');
@@ -819,7 +800,7 @@ function QuickBuyCalculator({
       return;
     }
     setSubmitting(true);
-    onBuy({ metalId, mode, value, estimate });
+    onBuy({ metalId: selectedMetalId, mode, value, estimate });
   };
   const updateMode = (nextMode) => {
     setMode(nextMode);
@@ -832,35 +813,38 @@ function QuickBuyCalculator({
     : ['0.5', '1', '2', '5', '10'];
 
   return (
-    <Card style={styles.calculatorCard}>
-      <View style={styles.calculatorHeader}>
+    <Card style={[styles.calculatorCard, expanded && styles.calculatorCardExpanded]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Quick Buy, ${expanded ? 'collapse' : 'expand'} purchase estimate`}
+        accessibilityState={{ expanded }}
+        onPress={onToggle}
+        style={({ pressed }) => [
+          styles.calculatorHeader,
+          expanded && styles.calculatorHeaderExpanded,
+          pressed && styles.calculatorHeaderPressed,
+        ]}
+      >
         <View style={styles.calculatorHeadingCopy}>
           <Text style={styles.calculatorTitle}>Quick Buy</Text>
           <Text style={styles.calculatorSubheading}>
-            {apiConfig.mode === 'demo' ? 'Estimate using illustrative demo rates' : 'Estimate using available market rates'}
+            Estimate your purchase before you buy.
           </Text>
         </View>
-        {apiConfig.mode === 'demo' ? <DemoBadge label="DEMO ESTIMATE" /> : null}
-      </View>
-      <Text style={styles.formLabel}>Choose metal</Text>
-      <View accessibilityLabel="Quick buy metal" style={styles.quickBuyMetalRow}>
-        {demoRates.map((metal) => {
-          const selected = metal.id === metalId;
-          return (
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              key={metal.id}
-              onPress={() => updateMetal(metal.id)}
-              style={[styles.quickBuyMetalOption, selected && styles.quickBuyMetalOptionSelected]}
-            >
-              <Text style={[styles.quickBuyMetalText, selected && styles.quickBuyMetalTextSelected]}>
-                {metal.id === 'gold' ? 'Gold' : metal.metal}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+        <View style={styles.calculatorHeaderActions}>
+          {apiConfig.mode === 'demo' ? <DemoBadge label="DEMO ESTIMATE" /> : null}
+          <MaterialIcons
+            name={expanded ? 'expand-less' : 'expand-more'}
+            size={23}
+            color={colors.primary}
+          />
+        </View>
+      </Pressable>
+      {expanded ? (
+      <>
+      <Text style={styles.quickBuySelectedMetal}>
+        Buying {selectedRate?.metal || selectedMetalId}
+      </Text>
       {ratesLoading ? (
         <View style={styles.quickBuyRateState}>
           <ActivityIndicator color={colors.primary} />
@@ -871,7 +855,7 @@ function QuickBuyCalculator({
       ) : (
         <View style={styles.quickRate}>
           <Text style={styles.summaryLabel}>
-            {apiConfig.mode === 'demo' ? 'Demo rate' : 'Rate'} · {selectedRate?.purity || 'Purity unavailable'}
+            {apiConfig.mode === 'demo' ? 'Demo rate' : 'Rate'} per gram
           </Text>
           <Text style={styles.summaryValue}>
             {rateAvailable ? `${formatINR(selectedRate.ratePerGram)} / g` : 'Rate unavailable'}
@@ -900,7 +884,7 @@ function QuickBuyCalculator({
         })}
       </View>
       <Text style={styles.formLabel}>
-        {mode === 'amount' ? 'Investment amount' : 'Quantity to buy'}
+        {mode === 'amount' ? 'Investment amount' : 'Quantity in grams'}
       </Text>
       <View style={[styles.quickBuyInputWrap, activeError && styles.quickBuyInputError]}>
         <TextInput
@@ -939,9 +923,10 @@ function QuickBuyCalculator({
             <SummaryRow label="Rate per gram" value={`${formatINR(estimate.ratePerGram)} / g`} />
             <SummaryRow label="Estimated quantity" value={`${estimate.quantityGrams.toFixed(6)} g`} />
             <SummaryRow label="Estimated metal value" value={formatINR(estimate.metalValue)} />
-            <SummaryRow label="Fees" value="Not configured" />
+            <SummaryRow label="Making charges" value="Not configured" />
+            <SummaryRow label="Taxes" value="Not configured" />
             <View style={styles.quickBuyTotal}>
-              <SummaryRow label="Total estimate · fees excluded" value={formatINR(estimate.totalEstimate)} />
+              <SummaryRow label="Estimated payable · configured charges excluded" value={formatINR(estimate.totalEstimate)} />
             </View>
           </View>
         </>
@@ -969,6 +954,8 @@ function QuickBuyCalculator({
           ? 'Demo only · continuing opens the existing local purchase review; no payment is made.'
           : 'Estimate only · the backend purchase quote and review flow are not connected. No order is sent.'}
       </Text>
+      </>
+      ) : null}
     </Card>
   );
 }
@@ -1152,6 +1139,7 @@ function ActionScreen({
           <Text style={styles.formLabel}>Choose metal</Text>
           <ChoiceRow
             accessibilityLabel="Choose metal"
+            variant="metal"
             options={demoRates.map((item) => ({ label: item.metal, value: item.id }))}
             value={metal}
             onChange={(next) => { setMetal(next); setError(''); }}
@@ -1249,6 +1237,7 @@ function ActionScreen({
         <Card style={styles.formCard}>
           <Text style={styles.formLabel}>Metal (demo selection)</Text>
           <ChoiceRow
+            variant="metal"
             options={demoRates.map((item) => ({ label: item.metal, value: item.id }))}
             value={metal}
             onChange={(next) => { setMetal(next); setError(''); }}
@@ -1299,7 +1288,7 @@ function ActionScreen({
       {action === 'gift' ? (
         <Card style={styles.formCard}>
           <View style={styles.giftFormIcon}>
-            <MaterialIcons name="card-giftcard" size={24} color="#67349B" />
+            <MaterialIcons name="card-giftcard" size={24} color={colors.goldDark} />
           </View>
           <Field
             label="Recipient name"
@@ -1484,7 +1473,7 @@ function TransactionRow({ transaction, onPress }) {
           {` · ${dateLabel}`}
         </Text>
         <View style={styles.transactionMetaRow}>
-          <Text style={styles.transactionStatus}>{transaction.status}</Text>
+          <StatusBadge status={transaction.status} />
           {String(transaction.status).toLowerCase().startsWith('demo') ? <DemoBadge label="DEMO" /> : null}
         </View>
       </View>
@@ -1707,7 +1696,7 @@ const profileSections = [
   { id: 'help', title: 'Help', icon: '?', detail: 'FAQs and support availability' },
 ];
 
-function ProfileScreen({ onOpenSection }) {
+function ProfileScreen({ onOpenSection, onLogout }) {
   return (
     <>
       <Text style={styles.profileIntro}>
@@ -1733,6 +1722,20 @@ function ProfileScreen({ onOpenSection }) {
             <Text style={styles.profileMenuChevron}>›</Text>
           </TouchableOpacity>
         ))}
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={onLogout}
+          style={styles.profileMenuItem}
+        >
+          <View style={styles.profileMenuIcon}>
+            <MaterialIcons name="logout" size={21} color={colors.primary} />
+          </View>
+          <View style={styles.profileMenuCopy}>
+            <Text style={styles.profileMenuTitle}>Logout</Text>
+            <Text style={styles.profileMenuDetail}>Sign out of your account</Text>
+          </View>
+          <Text style={styles.profileMenuChevron}>›</Text>
+        </TouchableOpacity>
       </Card>
     </>
   );
@@ -1843,6 +1846,9 @@ function SummaryRow({ label, value }) {
 export default function App() {
   const [screen, setScreen] = useState('login');
   const [tab, setTab] = useState('home');
+  const [quickBuyMetalId, setQuickBuyMetalId] = useState('gold');
+  const [quickBuyExpanded, setQuickBuyExpanded] = useState(false);
+  const [quickBuyScrollRequest, setQuickBuyScrollRequest] = useState(0);
   const [mobile, setMobile] = useState('');
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
@@ -1867,6 +1873,19 @@ export default function App() {
   const [selectedRate, setSelectedRate] = useState(demoRates[0]);
   const [profileSection, setProfileSection] = useState('account');
   const confirmationStarted = useRef(false);
+  const scrollViewRef = useRef(null);
+  const quickBuyOffset = useRef(0);
+
+  useEffect(() => {
+    if (!quickBuyExpanded || screen !== 'app' || tab !== 'home' || quickBuyScrollRequest === 0) return undefined;
+    const frame = requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollTo({
+        y: Math.max(0, quickBuyOffset.current - 12),
+        animated: true,
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [quickBuyExpanded, quickBuyScrollRequest, screen, tab]);
 
   const startBackendRefresh = useCallback(() => {
     if (apiConfig.mode !== 'backend') return;
@@ -2056,8 +2075,13 @@ export default function App() {
 
   const handleLogout = async () => {
     setBusy(true);
+    setError('');
+    let logoutErrorMessage = '';
     try {
       await logout();
+    } catch (logoutError) {
+      logoutErrorMessage = logoutError.message || 'Could not end the session.';
+    } finally {
       clearBackendData();
       setScreen('login');
       setTab('home');
@@ -2067,12 +2091,16 @@ export default function App() {
       setDemoHoldings({ ...demoPortfolio, goldInvested: 0, silverInvested: 0, platinumInvested: 0 });
       setTransactions([]);
       setSelectedTransaction(null);
-      setError('');
-    } catch (logoutError) {
-      setError(logoutError.message || 'Could not end the session.');
-    } finally {
+      setError(logoutErrorMessage);
       setBusy(false);
     }
+  };
+
+  const confirmLogout = () => {
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Logout', style: 'destructive', onPress: () => { void handleLogout(); } },
+    ]);
   };
 
   const openAction = (nextAction, draft = null) => {
@@ -2154,10 +2182,15 @@ export default function App() {
     setScreen('app');
   };
   const retryBackendData = startBackendRefresh;
+  const draftBuyMetal = action === 'buy'
+    ? demoRates.find((metal) => metal.id === actionDraft?.metal)?.metal || 'Gold'
+    : null;
   const headerTitle = screen === 'app'
     ? ({ home: '', savings: 'Savings', activity: 'Transaction History', account: 'Account', notifications: 'Notifications' }[tab] || 'DigiGold')
     : screen === 'action'
-      ? ({ buy: 'Buy Gold', sell: 'Sell Metal', redeem: 'Redeem Metal', sip: 'Start SIP', gift: 'Gift Gold' }[action] || 'DigiGold')
+      ? (action === 'buy'
+        ? `Buy ${draftBuyMetal}`
+        : ({ sell: 'Sell Metal', redeem: 'Redeem Metal', sip: 'Start SIP', gift: 'Gift Gold' }[action] || 'DigiGold'))
       : screen === 'review'
         ? 'Review Transaction'
         : screen === 'result'
@@ -2201,7 +2234,12 @@ export default function App() {
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         {screen === 'app' ? (
-          <ScrollView contentContainerStyle={styles.screenContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <ScrollView
+            ref={scrollViewRef}
+            contentContainerStyle={styles.screenContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             {tab !== 'home' ? (
               <DigiGoldHeader
                 title={headerTitle}
@@ -2215,7 +2253,15 @@ export default function App() {
                 onOpenAction={openAction}
                 onSupport={onOpenHelp}
                 onSelectTab={setTab}
-                onRateSelect={(rate) => { setSelectedRate(rate); setScreen('metalDetails'); }}
+                onRateSelect={(rate) => {
+                  setQuickBuyMetalId(rate.id);
+                  setQuickBuyExpanded(true);
+                  setQuickBuyScrollRequest((request) => request + 1);
+                }}
+                onQuickBuyLayout={(event) => { quickBuyOffset.current = event.nativeEvent.layout.y; }}
+                quickBuyMetalId={quickBuyMetalId}
+                quickBuyExpanded={quickBuyExpanded}
+                onQuickBuyToggle={() => setQuickBuyExpanded((expanded) => !expanded)}
                 rates={backendRatesItems}
                 ratesLoading={apiConfig.mode === 'backend' && backendRates.loading}
                 ratesError={apiConfig.mode === 'backend' ? backendRates.error : ''}
@@ -2254,6 +2300,7 @@ export default function App() {
             {tab === 'account' ? (
               <ProfileScreen
                 onOpenSection={(section) => { setProfileSection(section); setScreen('profileDetail'); }}
+                onLogout={confirmLogout}
               />
             ) : null}
           </ScrollView>
@@ -2279,7 +2326,7 @@ export default function App() {
               section={profileSection}
               mobile={mobile}
               name={customerName}
-              onLogout={handleLogout}
+              onLogout={confirmLogout}
               busy={busy}
               error={error}
             />
@@ -2392,7 +2439,8 @@ const styles = StyleSheet.create({
   notificationDot: { backgroundColor: colors.gold, borderColor: colors.surface, borderRadius: 5, borderWidth: 1, height: 9, position: 'absolute', right: 8, top: 8, width: 9 },
   avatarButton: { backgroundColor: colors.lightMint },
   avatarLetter: { color: colors.primary, fontSize: 16, fontWeight: '900' },
-  portfolioCard: { backgroundColor: colors.primary, borderRadius: 19, marginBottom: 25, padding: 18 },
+  portfolioCard: { backgroundColor: colors.primary, borderRadius: 20, marginBottom: 24, overflow: 'hidden', padding: 18 },
+  portfolioAccent: { backgroundColor: colors.gold, borderRadius: 2, height: 3, marginBottom: 12, width: 36 },
   portfolioEyebrow: { color: colors.onPrimary, fontSize: 11, fontWeight: '800', letterSpacing: 1.1, marginBottom: 7 },
   portfolioValue: { color: colors.surface, fontSize: 30, fontWeight: '900', marginTop: 10 },
   portfolioHelper: { color: colors.onPrimary, fontSize: 11, lineHeight: 17, marginTop: 6 },
@@ -2459,58 +2507,38 @@ const styles = StyleSheet.create({
   statementCopy: { flex: 1, minWidth: 0 },
   statementEmpty: { color: colors.muted, fontSize: 10, lineHeight: 14, marginTop: 5 },
   actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', marginBottom: 20 },
+  exploreSectionDescription: { color: colors.muted, fontSize: 12, lineHeight: 18, marginBottom: 12, marginTop: -6 },
   actionCard: {
-    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 15,
     borderWidth: 1,
-    elevation: 2,
-    minHeight: 154,
+    elevation: 1,
+    minHeight: 132,
     overflow: 'hidden',
-    padding: 9,
-    shadowColor: '#263A2F',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 5,
+    padding: 12,
+    shadowColor: colors.primaryDark,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
   },
   actionCardPressed: {
     elevation: 0,
-    opacity: 0.9,
+    borderColor: colors.primary,
+    opacity: 0.92,
     shadowOpacity: 0,
-    transform: [{ scale: 0.975 }],
+    transform: [{ scale: 0.985 }],
   },
   actionCardDisabled: { opacity: 0.7 },
   actionArt: {
     alignItems: 'center',
-    borderRadius: 12,
-    height: 70,
+    alignSelf: 'center',
+    borderRadius: 11,
+    height: 40,
     justifyContent: 'center',
     marginBottom: 8,
-    overflow: 'hidden',
-    position: 'relative',
+    width: 40,
   },
-  actionArtGlow: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 50,
-    height: 78,
-    opacity: 0.2,
-    position: 'absolute',
-    right: -16,
-    top: 31,
-    width: 150,
-  },
-  actionCoin: {
-    alignItems: 'center',
-    backgroundColor: colors.gold,
-    borderColor: '#FFF2C8',
-    borderRadius: 15,
-    borderWidth: 2,
-    bottom: 5,
-    height: 30,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: 11,
-    width: 30,
-  },
-  actionCoinText: { color: '#684900', fontSize: 14, fontWeight: '900' },
   actionCardFooter: {
     alignItems: 'center',
     flex: 1,
@@ -2520,20 +2548,17 @@ const styles = StyleSheet.create({
   actionCardCopy: { flex: 1, paddingRight: 5 },
   actionArrow: {
     alignItems: 'center',
-    borderRadius: 15,
-    height: 30,
+    borderRadius: 12,
+    height: 28,
     justifyContent: 'center',
     marginLeft: 4,
-    width: 30,
+    width: 24,
   },
-  actionArrowText: { fontSize: 22, fontWeight: '600', lineHeight: 25 },
-  actionTitle: { fontSize: 14, fontWeight: '900' },
-  actionDetail: { fontSize: 10, lineHeight: 13, marginTop: 3 },
+  actionArrowText: { color: colors.muted, fontSize: 20, fontWeight: '600', lineHeight: 24 },
+  actionTitle: { color: colors.text, fontSize: 14, fontWeight: '900', textAlign: 'center' },
+  actionDetail: { color: colors.muted, fontSize: 10, lineHeight: 14, marginTop: 3 },
   ratesDisclosure: { color: colors.muted, fontSize: 10, marginBottom: 9, marginTop: -6 },
-  rateGrid: { alignItems: 'stretch', flexDirection: 'row', gap: 8, marginBottom: 14 },
-  ratesScroller: { marginBottom: 14, marginHorizontal: -20, overflow: 'visible' },
-  rateRow: { alignItems: 'stretch', flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 5 },
-  ratesSwipeHint: { color: colors.muted, fontSize: 10, marginBottom: 10, marginTop: -6, textAlign: 'right' },
+  rateGrid: { alignItems: 'stretch', flexDirection: 'row', marginBottom: 14 },
   metalRateCard: {
     alignItems: 'flex-start',
     backgroundColor: colors.surface,
@@ -2541,29 +2566,38 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     elevation: 1,
+    flexShrink: 0,
     marginBottom: 2,
-    marginRight: 10,
-    minHeight: 132,
-    padding: 9,
-    shadowColor: '#263A2F',
+    marginRight: 8,
+    minHeight: 128,
+    padding: 8,
+    shadowColor: colors.primaryDark,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 3,
-    width: 140,
+    width: 136,
   },
-  metalRateCardCompact: { minHeight: 126, padding: 7 },
+  metalRateCardCompact: { alignItems: 'center', minHeight: 122, paddingHorizontal: 5, paddingVertical: 7 },
+  metalRateCardSelected: { borderBottomColor: colors.gold, borderBottomWidth: 3, borderColor: colors.primary },
+  metalRateCardPressed: {
+    backgroundColor: colors.softTeal,
+    borderColor: colors.primary,
+    borderWidth: 2,
+    elevation: 0,
+    transform: [{ scale: 0.98 }],
+  },
   metalIcon: { alignItems: 'center', borderRadius: 12, height: 38, justifyContent: 'center', marginBottom: 6, width: 38 },
-  metalIconCompact: { borderRadius: 10, height: 31, marginBottom: 4, width: 31 },
+  metalIconCompact: { borderRadius: 10, height: 30, marginBottom: 4, width: 30 },
   metalIcon_gold: { backgroundColor: colors.goldLight },
-  metalIcon_silver: { backgroundColor: '#EFF0F0' },
-  metalIcon_platinum: { backgroundColor: '#E9ECEB' },
+  metalIcon_silver: { backgroundColor: colors.silverSurface },
+  metalIcon_platinum: { backgroundColor: colors.platinumSurface },
   ratePerGram: { color: colors.muted, fontSize: 10, marginTop: 2 },
   ratePurity: { color: colors.muted, fontSize: 10, marginTop: 4 },
-  ratePrice: { color: colors.text, fontSize: 17, fontWeight: '900', marginTop: 8 },
+  ratePrice: { color: colors.text, fontSize: 16, fontWeight: '900', marginTop: 7 },
   rateName: { color: colors.text, fontSize: 13, fontWeight: '800' },
-  rateNameCompact: { fontSize: 11 },
-  ratePriceCompact: { fontSize: 12, marginTop: 6 },
-  rateTextCompact: { fontSize: 9 },
+  rateNameCompact: { fontSize: 11, textAlign: 'center' },
+  ratePriceCompact: { fontSize: 12, marginTop: 5, textAlign: 'center' },
+  rateTextCompact: { fontSize: 9, textAlign: 'center' },
   dataLoading: { alignItems: 'center', flexDirection: 'row', gap: 10, justifyContent: 'center', minHeight: 70 },
   dataLoadingText: { color: colors.muted, fontSize: 12 },
   dataError: { backgroundColor: colors.errorBackground, borderRadius: 12, marginBottom: 12, padding: 12 },
@@ -2582,25 +2616,15 @@ const styles = StyleSheet.create({
   recentActivityAmount: { color: colors.text, fontSize: 11, fontWeight: '800', marginLeft: 7, maxWidth: 88 },
   noRecentActivity: { color: colors.muted, fontSize: 12, marginBottom: 18, paddingVertical: 16, textAlign: 'center' },
   calculatorCard: { marginBottom: 18, padding: 16 },
-  calculatorHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
+  calculatorCardExpanded: { borderColor: colors.primary },
+  calculatorHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 0, minHeight: 48 },
+  calculatorHeaderExpanded: { marginBottom: 15 },
+  calculatorHeaderPressed: { opacity: 0.78 },
   calculatorHeadingCopy: { flex: 1, paddingRight: 8 },
+  calculatorHeaderActions: { alignItems: 'center', flexDirection: 'row', gap: 5 },
   calculatorTitle: { color: colors.text, fontSize: 17, fontWeight: '900' },
   calculatorSubheading: { color: colors.muted, fontSize: 11, marginTop: 3 },
-  quickBuyMetalRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  quickBuyMetalOption: {
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderColor: colors.border,
-    borderRadius: 11,
-    borderWidth: 1,
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 42,
-    paddingHorizontal: 5,
-  },
-  quickBuyMetalOptionSelected: { backgroundColor: colors.lightMint, borderColor: colors.primary },
-  quickBuyMetalText: { color: colors.muted, fontSize: 11, fontWeight: '700' },
-  quickBuyMetalTextSelected: { color: colors.primaryDark, fontWeight: '900' },
+  quickBuySelectedMetal: { color: colors.primary, fontSize: 14, fontWeight: '900', marginBottom: 8 },
   quickBuyModeRow: {
     backgroundColor: colors.background,
     borderRadius: 12,
@@ -2677,7 +2701,7 @@ const styles = StyleSheet.create({
   giftFormIcon: {
     alignItems: 'center',
     alignSelf: 'center',
-    backgroundColor: '#F1EAF8',
+    backgroundColor: colors.goldLight,
     borderRadius: 16,
     height: 48,
     justifyContent: 'center',

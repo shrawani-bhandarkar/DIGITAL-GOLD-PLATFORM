@@ -47,17 +47,20 @@ Native, the entry point, and existing scripts are unchanged.
 
 ## Metal rates and purchase estimates
 
-The dashboard uses a compact purple DigiGold header, followed by tappable
-Gold 24K, Silver, and Platinum rate cards before the Explore DigiGold actions.
-The rates have a fixed-height horizontal viewport so the cards remain visible
-and can be swiped on narrow screens. Rates and sample holdings live in
-`src/services/demoData.js`; they are illustrative and are not live market
+The dashboard order is the existing DigiGold welcome header, Current Metal
+Rates, Quick Buy, Explore DigiGold actions, and Recent Activity. Gold 24K,
+Silver, and Platinum rate cards are tappable; tapping one opens Quick Buy,
+selects that metal, and scrolls the dashboard to the estimate. Quick Buy can
+also be expanded or collapsed and retains the existing amount or gram-based
+estimate and local purchase-review flow. The rates have a fixed horizontal
+viewport and can be swiped on narrow screens. Rates and sample holdings live
+in `src/services/demoData.js`; they are illustrative and are not live market
 data. Gross and net weights are shown only when corresponding weight fields
 are present in the portfolio data (for example, `goldGrossWeightGrams` or
-`grossWeightGrams.gold`); otherwise the UI says they are unavailable.
-The local demo `*Grams` holding is not presented as gross or purity-adjusted
-net weight. No percentage price movement is shown because no verified
-previous-rate feed is configured.
+`grossWeightGrams.gold`); otherwise the UI says they are unavailable. The
+local demo `*Grams` holding is not presented as gross or purity-adjusted net
+weight. No percentage price movement is shown because no verified previous-rate
+feed is configured.
 
 The dashboard **Quick Buy** calculator and dedicated Buy form share the
 buy-only `calculateBuyEstimate` calculation in

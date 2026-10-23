@@ -8,7 +8,6 @@ import {
   View,
 } from 'react-native';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { colors, commonStyles } from '../theme';
 
 export function DigiGoldHeader({
@@ -19,12 +18,7 @@ export function DigiGoldHeader({
   onSupport,
 }) {
   return (
-    <LinearGradient
-      colors={['#54208E', '#753CB4', '#8B58C7']}
-      end={{ x: 1, y: 1 }}
-      start={{ x: 0, y: 0 }}
-      style={[styles.digiGoldHeader, home && styles.digiGoldHeaderHome]}
-    >
+    <View style={[styles.digiGoldHeader, home && styles.digiGoldHeaderHome]}>
       <View style={styles.digiGoldHeaderTop}>
         <View style={styles.digiGoldBrand}>
           <MaterialCommunityIcons name="gold" size={29} color={colors.gold} />
@@ -58,7 +52,7 @@ export function DigiGoldHeader({
       ) : (
         <Text style={styles.digiGoldPageTitle}>{title}</Text>
       )}
-    </LinearGradient>
+    </View>
   );
 }
 
@@ -125,6 +119,14 @@ export function Button({
   );
 }
 
+export function PrimaryButton(props) {
+  return <Button {...props} variant="primary" />;
+}
+
+export function SecondaryButton(props) {
+  return <Button {...props} variant="secondary" />;
+}
+
 export function Card({ children, style }) {
   return <View style={[commonStyles.card, commonStyles.shadow, style]}>{children}</View>;
 }
@@ -176,6 +178,44 @@ export function SectionTitle({ title, action, onAction }) {
   );
 }
 
+export function LoadingState({ label = 'Loading…' }) {
+  return (
+    <View accessibilityRole="progressbar" style={styles.stateRow}>
+      <ActivityIndicator color={colors.primary} />
+      <Text style={styles.stateText}>{label}</Text>
+    </View>
+  );
+}
+
+export function ErrorState({ message, onRetry }) {
+  return (
+    <View accessibilityLiveRegion="polite" style={styles.errorState}>
+      <Text style={styles.errorStateText}>{message}</Text>
+      {onRetry ? (
+        <TouchableOpacity accessibilityRole="button" onPress={onRetry} style={styles.errorRetry}>
+          <Text style={styles.errorRetryText}>Retry</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
+export function StatusBadge({ status }) {
+  const normalized = String(status).toLowerCase();
+  const tone = normalized.includes('complete') || normalized.includes('success')
+    ? [styles.statusSuccess, styles.statusTextSuccess]
+    : normalized.includes('pending') || normalized.includes('processing')
+      ? [styles.statusPending, styles.statusTextPending]
+      : normalized.includes('fail') || normalized.includes('cancel') || normalized.includes('reject')
+        ? [styles.statusError, styles.statusTextError]
+        : [styles.statusNeutral, styles.statusTextNeutral];
+  return (
+    <View style={[styles.statusBadge, tone[0]]}>
+      <Text style={[styles.statusText, tone[1]]}>{status}</Text>
+    </View>
+  );
+}
+
 export function Field({ label, value, onChangeText, placeholder, keyboardType, error, ...props }) {
   return (
     <View style={styles.fieldWrap}>
@@ -196,9 +236,13 @@ export function Field({ label, value, onChangeText, placeholder, keyboardType, e
   );
 }
 
-export function ChoiceRow({ options, value, onChange, accessibilityLabel }) {
+export function ChoiceRow({ options, value, onChange, accessibilityLabel, variant }) {
+  const isMetalPicker = variant === 'metal';
   return (
-    <View accessibilityLabel={accessibilityLabel} style={styles.choiceRow}>
+    <View
+      accessibilityLabel={accessibilityLabel}
+      style={[styles.choiceRow, isMetalPicker && styles.choiceRowMetal]}
+    >
       {options.map((option) => {
         const selected = option.value === value;
         return (
@@ -207,7 +251,11 @@ export function ChoiceRow({ options, value, onChange, accessibilityLabel }) {
             accessibilityState={{ selected }}
             key={option.value}
             onPress={() => onChange(option.value)}
-            style={[styles.choice, selected && styles.choiceSelected]}
+            style={[
+              styles.choice,
+              isMetalPicker && styles.choiceMetal,
+              selected && styles.choiceSelected,
+            ]}
           >
             <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>
               {option.label}
@@ -233,8 +281,11 @@ export function EmptyState({ title, body, symbol = '—' }) {
 
 const styles = StyleSheet.create({
   digiGoldHeader: {
+    backgroundColor: colors.primaryDark,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
+    borderBottomColor: colors.gold,
+    borderBottomWidth: 2,
     marginBottom: 16,
     marginHorizontal: -20,
     marginTop: -16,
@@ -256,9 +307,9 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     width: 38,
   },
-  digiGoldGreeting: { color: '#F1E8FA', fontSize: 12, fontWeight: '700', marginTop: 15 },
+  digiGoldGreeting: { color: colors.onPrimary, fontSize: 12, fontWeight: '700', marginTop: 15 },
   digiGoldTagline: { color: colors.surface, fontSize: 21, fontWeight: '900', lineHeight: 27, marginTop: 3 },
-  digiGoldSubtitle: { color: '#F1E8FA', fontSize: 12, marginTop: 5 },
+  digiGoldSubtitle: { color: colors.onPrimary, fontSize: 12, marginTop: 5 },
   digiGoldPageTitle: { color: colors.surface, fontSize: 19, fontWeight: '900', marginTop: 12 },
   brandRow: { alignItems: 'center', flexDirection: 'row' },
   brandMark: {
@@ -279,7 +330,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 9,
     justifyContent: 'center',
-    minHeight: 52,
+    minHeight: 54,
     paddingHorizontal: 18,
   },
   buttonPrimary: { backgroundColor: colors.primary },
@@ -323,7 +374,24 @@ const styles = StyleSheet.create({
   },
   fieldError: { borderColor: colors.error },
   errorText: { color: colors.error, fontSize: 11, marginTop: 5 },
+  stateRow: { alignItems: 'center', flexDirection: 'row', gap: 10, justifyContent: 'center', minHeight: 70 },
+  stateText: { color: colors.muted, fontSize: 12 },
+  errorState: { backgroundColor: colors.errorBackground, borderRadius: 12, marginBottom: 12, padding: 12 },
+  errorStateText: { color: colors.error, fontSize: 12, lineHeight: 18 },
+  errorRetry: { alignSelf: 'flex-start', marginTop: 7, minHeight: 36, justifyContent: 'center', paddingRight: 12 },
+  errorRetryText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
+  statusBadge: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  statusSuccess: { backgroundColor: colors.successBackground },
+  statusPending: { backgroundColor: colors.goldLight },
+  statusError: { backgroundColor: colors.errorBackground },
+  statusNeutral: { backgroundColor: colors.lightMint },
+  statusText: { fontSize: 10, fontWeight: '800' },
+  statusTextSuccess: { color: colors.success },
+  statusTextPending: { color: colors.goldDark },
+  statusTextError: { color: colors.error },
+  statusTextNeutral: { color: colors.primaryDark },
   choiceRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 },
+  choiceRowMetal: { flexWrap: 'nowrap', gap: 6 },
   choice: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -335,7 +403,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 13,
   },
-  choiceSelected: { backgroundColor: colors.lightMint, borderColor: colors.primary },
+  choiceMetal: { alignItems: 'center', flex: 1, marginRight: 0, minWidth: 0, paddingHorizontal: 5 },
+  choiceSelected: { backgroundColor: colors.lightMint, borderColor: colors.primary, borderWidth: 2 },
   choiceText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
   choiceTextSelected: { color: colors.primary },
   empty: { alignItems: 'center', paddingHorizontal: 18, paddingVertical: 27 },
