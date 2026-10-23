@@ -151,11 +151,8 @@ function LoginScreen({ mobile, setMobile, error, busy, onContinue }) {
             />
             <Text style={styles.centerHelper}>We’ll guide you through verification.</Text>
           </Card>
-          <Notice type="warning" style={styles.authNotice}>
-            DEMO AUTHENTICATION · No SMS is sent. This local demo is not secure account authentication.
-          </Notice>
           <Text style={styles.authDisclaimer}>
-            No real account, payment, investment, or transaction is created in this demonstration.
+            Sign in with a mobile number registered to an active DigiGold customer account.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -163,7 +160,7 @@ function LoginScreen({ mobile, setMobile, error, busy, onContinue }) {
   );
 }
 
-function OtpScreen({ mobile, otp, setOtp, error, busy, seconds, onVerify, onResend, onBack }) {
+function OtpScreen({ mobile, otp, setOtp, developmentOtp, error, busy, seconds, onVerify, onResend, onBack }) {
   const masked = mobile.replace(/^(\d{2})\d{5}(\d{3})$/, '$1•••••$2');
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -175,7 +172,7 @@ function OtpScreen({ mobile, otp, setOtp, error, busy, seconds, onVerify, onRese
           </TouchableOpacity>
           <Brand />
           <View style={styles.authIntro}>
-            <Text style={styles.eyebrow}>DEMO VERIFICATION</Text>
+            <Text style={styles.eyebrow}>SECURE VERIFICATION</Text>
             <Text style={styles.authTitle}>Enter your code</Text>
             <Text style={styles.muted}>Enter the six-digit code for +91 {masked}.</Text>
           </View>
@@ -211,12 +208,12 @@ function OtpScreen({ mobile, otp, setOtp, error, busy, seconds, onVerify, onRese
               </TouchableOpacity>
             </View>
           </Card>
-          {apiConfig.mode === 'demo' ? (
+          {__DEV__ && developmentOtp ? (
             <Notice type="warning" style={styles.authNotice}>
-              DEMO OTP: 123456 · No SMS was sent. Do not use this code to access a real account.
+              Development OTP: {developmentOtp}
             </Notice>
           ) : (
-            <Notice style={styles.authNotice}>OTP delivery depends on the configured backend service.</Notice>
+            <Notice style={styles.authNotice}>Enter the verification code sent to your registered mobile number.</Notice>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1851,13 +1848,14 @@ export default function App() {
   const [quickBuyScrollRequest, setQuickBuyScrollRequest] = useState(0);
   const [mobile, setMobile] = useState('');
   const [otp, setOtp] = useState('');
+  const [developmentOtp, setDevelopmentOtp] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [resendSeconds, setResendSeconds] = useState(0);
   const [action, setAction] = useState('');
   const [actionDraft, setActionDraft] = useState(null);
   const [reviewOrder, setReviewOrder] = useState(null);
-  const [customerName, setCustomerName] = useState('Demo customer');
+  const [customerName, setCustomerName] = useState('Customer');
   const [demoHoldings, setDemoHoldings] = useState(() => ({
     ...demoPortfolio,
     goldInvested: 0,
@@ -2024,7 +2022,8 @@ export default function App() {
     setError('');
     setBusy(true);
     try {
-      await requestOtp(mobile);
+      const result = await requestOtp(mobile);
+      setDevelopmentOtp(typeof result?.developmentOtp === 'string' ? result.developmentOtp : '');
       setOtp('');
       setResendSeconds(30);
       setScreen('otp');
@@ -2045,10 +2044,11 @@ export default function App() {
     try {
       const result = await verifyOtp(mobile, otp);
       if (!result.verified) {
-        setError('That demo code is incorrect. Check the code and try again.');
+        setError('That code is incorrect or expired. Check it and try again.');
         return;
       }
-      setCustomerName(result.profile && result.profile.name ? result.profile.name : demoProfile(mobile).name);
+      setCustomerName(result.profile?.name || 'Customer');
+      setDevelopmentOtp('');
       setTab('home');
       startBackendRefresh();
       setScreen('app');
@@ -2063,7 +2063,8 @@ export default function App() {
     setBusy(true);
     setError('');
     try {
-      await requestOtp(mobile);
+      const result = await requestOtp(mobile);
+      setDevelopmentOtp(typeof result?.developmentOtp === 'string' ? result.developmentOtp : '');
       setOtp('');
       setResendSeconds(30);
     } catch (requestError) {
@@ -2087,7 +2088,8 @@ export default function App() {
       setTab('home');
       setMobile('');
       setOtp('');
-      setCustomerName('Demo customer');
+      setCustomerName('Customer');
+      setDevelopmentOtp('');
       setDemoHoldings({ ...demoPortfolio, goldInvested: 0, silverInvested: 0, platinumInvested: 0 });
       setTransactions([]);
       setSelectedTransaction(null);
@@ -2219,13 +2221,14 @@ export default function App() {
       <OtpScreen
         mobile={mobile}
         otp={otp}
+        developmentOtp={developmentOtp}
         setOtp={(value) => { setOtp(value); setError(''); }}
         error={error}
         busy={busy}
         seconds={resendSeconds}
         onVerify={handleVerify}
         onResend={handleResend}
-        onBack={() => { setScreen('login'); setOtp(''); setError(''); setResendSeconds(0); }}
+        onBack={() => { setScreen('login'); setOtp(''); setDevelopmentOtp(''); setError(''); setResendSeconds(0); }}
       />
     );
   }

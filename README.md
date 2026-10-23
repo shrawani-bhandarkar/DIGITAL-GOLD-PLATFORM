@@ -7,8 +7,9 @@ Monorepo structure for a digital gold and silver platform: customer mobile app, 
 ```text
 apps/
   api/       Node.js + Express + TypeScript API, divided by business domain
-  mobile/    Customer app using React Native + Expo (Android-first)
+  mobile/    React Native + Expo workspace scaffold
   web/       Operations/admin portal using React + Vite
+customer-mobile-app/ Customer-facing Expo app with OTP sign-in and navigation
 docs/        Architecture, workflows, data entities, security, and open decisions
 ```
 
@@ -24,6 +25,7 @@ The mobile app is customer-facing. The web app is for authorized operational rol
 
 ```bash
 npm install
+npm install --prefix customer-mobile-app
 Copy-Item apps\api\.env.example apps\api\.env
 npm run dev
 ```
@@ -34,7 +36,7 @@ The web app runs at `http://localhost:5173`; the API runs at `http://localhost:4
 npm run dev:mobile
 ```
 
-Use Expo Go or an Android emulator to open the customer mobile app. Generate native Android project files only when needed with `npx expo prebuild --platform android` from `apps/mobile`.
+`npm run dev:mobile` starts the customer app in `customer-mobile-app`. Use Expo Go or an Android emulator to open it. Generate native Android project files only when needed with `npx expo prebuild --platform android` from `customer-mobile-app`.
 
 ## API database
 
@@ -45,7 +47,14 @@ mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS digital_gold_db CHARACTER SET
 mysql -u root -p digital_gold_db < C:\Users\ASUS\Downloads\Dump20261015.sql
 ```
 
-Set `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` in `apps/api/.env` to match your MySQL account. The API checks the MySQL connection before it starts; `/api/health/db` reports database readiness. The dump contains table definitions only, not application records.
+Set `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` in `apps/api/.env` to match your MySQL account. The API checks the MySQL connection before it starts; `/api/health/db` reports database readiness. The dump contains table definitions only, not application records. After importing it, apply the admin-console schema (which includes the admin-managed customer profile table) and the customer-auth schema:
+
+```cmd
+mysql -u root -p digital_gold_db < apps\api\src\modules\admin-console\schema.sql
+mysql -u root -p digital_gold_db < apps\api\src\modules\customer-auth\schema.sql
+```
+
+Customer OTP requests are accepted only for active customer records created in the admin panel. In API development mode the OTP is returned to the app for local testing; production SMS delivery is not configured.
 
 ### Admin panel sign-in
 
@@ -76,6 +85,6 @@ npm run dev:mobile
 
 ## Scope and implementation status
 
-This is a structural scaffold with starter entry points and database connectivity—not a functioning financial product. Admin-panel sign-in and server sessions are database-backed; customer authentication, server-side authorization for operational actions, KYC, persistence-backed API operations, provider integrations, order processing, ledger, payments, reconciliation, and the screens/actions listed in the planning docs still need implementation and testing. Provider choices and business policies are intentionally left open; see [docs/decisions-required.md](./docs/decisions-required.md). No image assets are included.
+This is not a functioning financial product. Admin-panel sign-in and server sessions are database-backed, and customer OTP authentication is implemented in the customer app and API. Customer login requires an active admin-panel customer record and the customer-authentication schema; development OTP delivery is local-only. Server-side authorization for all operational actions, KYC, persistence-backed customer operations, provider integrations, order processing, ledger, payments, and reconciliation still need implementation and testing. Provider choices and business policies are intentionally left open; see [docs/decisions-required.md](./docs/decisions-required.md). No image assets are included.
 
 Review [docs/architecture.md](./docs/architecture.md), [docs/workflows.md](./docs/workflows.md), [docs/data-model.md](./docs/data-model.md), and [docs/security-and-operations.md](./docs/security-and-operations.md) before implementation.

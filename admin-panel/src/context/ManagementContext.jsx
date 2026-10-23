@@ -6,16 +6,41 @@ import { useAdmin } from './AdminContext.jsx';
 const ManagementContext = createContext(null);
 const SUPPORTED_METALS = ['Gold', 'Silver', 'Platinum'];
 export function ManagementProvider() {
-  const { activeRoleId, recordAudit, setPersistenceError, consoleState } = useAdmin();
+  const { activeRoleId, hasPermission, recordAudit, setPersistenceError, consoleState } = useAdmin();
   const [customers, setCustomers] = useState([]);
+  const [customersLoading, setCustomersLoading] = useState(true);
   const [products, setProducts] = useState([]);
   const [rateRequests, setRateRequests] = useState([]);
   const [metalMakingCharges, setMetalMakingCharges] = useState([]);
   const [ledgerEntries, setLedgerEntries] = useState([]);
 
   useEffect(() => {
+    if (activeRoleId !== 'SUPER_ADMIN' && !consoleState) return;
+    if (!hasPermission('customers')) {
+      setCustomers([]);
+      setCustomersLoading(false);
+      return;
+    }
+    let mounted = true;
+    setCustomersLoading(true);
+    apiRequest('/api/admin/console/customers')
+      .then((rows) => {
+        if (!Array.isArray(rows)) throw new Error('API returned invalid customer data.');
+        if (!mounted) return;
+        setCustomers(rows);
+        setPersistenceError('');
+      })
+      .catch((error) => {
+        if (mounted) setPersistenceError(error.message);
+      })
+      .finally(() => {
+        if (mounted) setCustomersLoading(false);
+      });
+    return () => { mounted = false; };
+  }, [activeRoleId, consoleState, hasPermission, setPersistenceError]);
+
+  useEffect(() => {
     if (!consoleState) return;
-    setCustomers(consoleState.customers ?? []);
     setProducts(consoleState.products ?? []);
     setRateRequests(consoleState.rateRequests ?? []);
     const configuredCharges = consoleState.metalMakingCharges ?? [];
@@ -76,6 +101,7 @@ export function ManagementProvider() {
 
   const value = useMemo(() => ({
     customers,
+    customersLoading,
     products,
     rateRequests,
     metalMakingCharges,
@@ -85,7 +111,7 @@ export function ManagementProvider() {
       const saved = await persist('/api/admin/console/customers', { method: 'POST', body: customer });
       if (!saved) return null;
       setCustomers((items) => [saved, ...items]);
-      recordAudit({ action: 'Created customer profile', category: 'Customers', target: customer.id, detail: 'Demo customer profile created with pending KYC.' });
+      recordAudit({ action: 'Created customer profile', category: 'Customers', target: saved.id, detail: 'Customer profile created with pending KYC.' });
       return saved;
     },
     updateCustomer: async (id, updates) => {
@@ -141,7 +167,7 @@ export function ManagementProvider() {
       }
       return true;
     },
-  }), [customers, products, rateRequests, metalMakingCharges, ledgerEntries, recordAudit, activeRoleId, setPersistenceError]);
+  }), [customers, customersLoading, products, rateRequests, metalMakingCharges, ledgerEntries, recordAudit, activeRoleId, setPersistenceError]);
 
   return <ManagementContext.Provider value={value}><Outlet /></ManagementContext.Provider>;
 }

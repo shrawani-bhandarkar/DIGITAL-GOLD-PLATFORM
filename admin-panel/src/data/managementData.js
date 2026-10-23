@@ -1,16 +1,3 @@
-export const initialCustomers = [
-  { id: 'CUS-10482', name: 'Aarav Mehta', email: 'aarav.mehta@email.com', phone: '+91 98765 43210', city: 'Mumbai', joined: '14 Oct 2026', kycStatus: 'Pending', status: 'Active', pan: 'AXXPM4821K', transactions: 12 },
-  { id: 'CUS-10481', name: 'Diya Sharma', email: 'diya.sharma@email.com', phone: '+91 98201 77432', city: 'Bengaluru', joined: '14 Oct 2026', kycStatus: 'Verified', status: 'Active', pan: 'BYYPS6734L', transactions: 28 },
-  { id: 'CUS-10480', name: 'Kabir Nair', email: 'kabir.nair@email.com', phone: '+91 98450 12876', city: 'Kochi', joined: '13 Oct 2026', kycStatus: 'Pending', status: 'Active', pan: 'CZZPN2190M', transactions: 6 },
-  { id: 'CUS-10479', name: 'Ananya Iyer', email: 'ananya.iyer@email.com', phone: '+91 99867 55421', city: 'Chennai', joined: '12 Oct 2026', kycStatus: 'Verified', status: 'Active', pan: 'DABPI9456N', transactions: 35 },
-  { id: 'CUS-10478', name: 'Rohan Gupta', email: 'rohan.gupta@email.com', phone: '+91 98110 66328', city: 'New Delhi', joined: '11 Oct 2026', kycStatus: 'Rejected', status: 'Active', pan: 'EBBPG5632P', transactions: 0 },
-  { id: 'CUS-10477', name: 'Mira Patel', email: 'mira.patel@email.com', phone: '+91 98980 33421', city: 'Ahmedabad', joined: '10 Oct 2026', kycStatus: 'Verified', status: 'Suspended', pan: 'FCDPP1782Q', transactions: 9 },
-  { id: 'CUS-10476', name: 'Ishaan Reddy', email: 'ishaan.reddy@email.com', phone: '+91 98490 74215', city: 'Hyderabad', joined: '09 Oct 2026', kycStatus: 'Verified', status: 'Active', pan: 'GDEPR6104R', transactions: 19 },
-  { id: 'CUS-10475', name: 'Sana Khan', email: 'sana.khan@email.com', phone: '+91 98923 10876', city: 'Pune', joined: '08 Oct 2026', kycStatus: 'Pending', status: 'Active', pan: 'HEFPK3027S', transactions: 4 },
-  { id: 'CUS-10474', name: 'Arjun Rao', email: 'arjun.rao@email.com', phone: '+91 98451 90832', city: 'Mysuru', joined: '07 Oct 2026', kycStatus: 'Verified', status: 'Active', pan: 'JGHPR8249T', transactions: 42 },
-  { id: 'CUS-10473', name: 'Tara Bose', email: 'tara.bose@email.com', phone: '+91 98300 77124', city: 'Kolkata', joined: '06 Oct 2026', kycStatus: 'Verified', status: 'Active', pan: 'KJKPB5301U', transactions: 11 },
-];
-
 export const initialProducts = [
   { id: 'MET-001', name: '24K Digital Gold', metal: 'Gold', purity: '999.9', unit: 'gram', buyRate: 7825, sellRate: 7580, minOrder: 10, maxOrder: 500000, buyChargeBps: 0, buyTaxBps: 0, sellChargeBps: 0, sellTaxBps: 0, minBuyQuantity: '', maxBuyQuantity: '', minSellQuantity: '', maxSellQuantity: '', redemptionEnabled: true, allowCoinDelivery: true, allowCashPayout: true, minRedemptionQuantity: '0.1', maxRedemptionQuantity: '1000', redemptionChargePaise: 0, redemptionTaxBps: 0, status: 'Active' },
   { id: 'MET-002', name: '22K Digital Gold', metal: 'Gold', purity: '916.0', unit: 'gram', buyRate: 7170, sellRate: 6945, minOrder: 10, maxOrder: 500000, buyChargeBps: 0, buyTaxBps: 0, sellChargeBps: 0, sellTaxBps: 0, minBuyQuantity: '', maxBuyQuantity: '', minSellQuantity: '', maxSellQuantity: '', redemptionEnabled: true, allowCoinDelivery: true, allowCashPayout: true, minRedemptionQuantity: '0.1', maxRedemptionQuantity: '1000', redemptionChargePaise: 0, redemptionTaxBps: 0, status: 'Active' },

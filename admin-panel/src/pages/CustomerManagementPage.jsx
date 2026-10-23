@@ -14,7 +14,7 @@ const PAGE_SIZE = 7;
 
 export default function CustomerManagementPage() {
   useDocumentTitle('Customers');
-  const { customers, products, ledgerEntries, addCustomer } = useManagement();
+  const { customers, customersLoading, products, ledgerEntries, addCustomer } = useManagement();
   const [query, setQuery] = useState('');
   const [kycFilter, setKycFilter] = useState('All verification statuses');
   const [accountFilter, setAccountFilter] = useState('All account statuses');
@@ -69,9 +69,11 @@ export default function CustomerManagementPage() {
       return;
     }
     const saved = await addCustomer({
-      id: `CUS-${String(Date.now()).slice(-5)}`, name, email, phone, pan,
-      city: formData.get('city').trim(), joined: '15 Oct 2026', kycStatus: 'Pending',
-      status: 'Active', transactions: 0,
+      name,
+      email,
+      phone,
+      pan,
+      city: formData.get('city').trim(),
     });
     if (!saved) { setFormError('Could not save the customer. Check the database connection and try again.'); return; }
     setPage(1);
@@ -110,11 +112,15 @@ export default function CustomerManagementPage() {
             </select>
           </div>
         </div>
-        <DataTable columns={columns} rows={visibleCustomers} allRows={filteredCustomers} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} rowKey="id" />
-        <Pagination page={page} pageSize={PAGE_SIZE} total={filteredCustomers.length} onPageChange={setPage} />
+        {customersLoading
+          ? <p className="empty-state" role="status">Loading customer profiles…</p>
+          : <>
+            <DataTable columns={columns} rows={visibleCustomers} allRows={filteredCustomers} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} rowKey="id" />
+            <Pagination page={page} pageSize={PAGE_SIZE} total={filteredCustomers.length} onPageChange={setPage} />
+          </>}
       </section>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Add customer" description="Create a demo customer profile. New profiles start with pending identity verification.">
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Add customer" description="Create a customer profile. New profiles start with pending identity verification.">
         <form className="management-form" onSubmit={createCustomer}>
           <div className="form-grid">
             <label className="field-block"><span>Full name</span><input name="name" required minLength="2" maxLength="80" autoComplete="name" placeholder="e.g. Priya Kapoor" /></label>

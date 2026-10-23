@@ -53,6 +53,14 @@ export async function apiRequest(route, { body, query, idempotencyKey } = {}) {
     clearTimeout(timeout);
   }
 
+  let payload = null;
+  if (response.status !== 204) {
+    try {
+      payload = await response.json();
+    } catch {
+      throw new ApiError('The service returned an invalid response.', response.status, 'INVALID_RESPONSE');
+    }
+  }
   if (response.status === 401) {
     const hadSession = Boolean(accessToken);
     setAccessToken(null);
@@ -60,23 +68,18 @@ export async function apiRequest(route, { body, query, idempotencyKey } = {}) {
     throw new ApiError(
       hadSession
         ? 'Your session has expired. Please sign in again.'
-        : 'The service rejected the authentication request.',
+        : typeof payload?.message === 'string'
+          ? payload.message
+          : 'The service rejected the authentication request.',
       401,
       'UNAUTHORIZED',
     );
   }
-
-  let payload = null;
-  if (response.status !== 204) {
-    try {
-      payload = await response.json();
-    } catch (error) {
-      throw new ApiError('The service returned an invalid response.', response.status, 'INVALID_RESPONSE');
-    }
-  }
   if (!response.ok) {
     throw new ApiError(
-      response.status >= 500
+      typeof payload?.message === 'string'
+        ? payload.message
+        : response.status >= 500
         ? 'The service is temporarily unavailable. Please try again later.'
         : 'The request could not be completed. Check the details and try again.',
       response.status,

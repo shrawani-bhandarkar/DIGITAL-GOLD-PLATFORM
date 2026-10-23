@@ -107,6 +107,21 @@ function parseJson<T>(value: unknown): T {
   return value as T;
 }
 
+function customerRecord(row: RowDataPacket): Record<string, unknown> {
+  return {
+    id: `CUS-${row.user_id}`,
+    name: row.full_name,
+    email: row.email ?? "",
+    phone: row.mobile ?? "",
+    city: row.city ?? "",
+    pan: row.pan ?? "",
+    joined: row.created_at,
+    kycStatus: row.verification_status === "VERIFIED" ? "Verified" : row.verification_status === "REJECTED" ? "Rejected" : row.verification_status === "IN_PROGRESS" ? "In review" : "Pending",
+    status: row.status === "ACTIVE" ? "Active" : "Suspended",
+    transactions: Number(row.transactions ?? 0),
+  };
+}
+
 function userIdFromCustomerId(customerId: unknown): number {
   if (typeof customerId !== "string" || !/^CUS-\d+$/.test(customerId)) {
     throw new Error("Choose an existing customer.");
@@ -209,14 +224,6 @@ router.get("/state", async (request, response) => {
   try {
     const actor = (request as unknown as AuthenticatedRequest).admin;
     const permissions = await readPermissions(actor.roleId);
-    const [customers] = await database.execute<RowDataPacket[]>(
-      `SELECT u.user_id, u.full_name, u.email, u.mobile, u.status, u.verification_status, u.created_at,
-              p.city, p.pan,
-              (SELECT COUNT(*) FROM admin_orders o WHERE o.customer_user_id = u.user_id) AS transactions
-       FROM users u
-       LEFT JOIN admin_customer_profiles p ON p.user_id = u.user_id
-       ORDER BY u.created_at DESC, u.user_id DESC`,
-    );
     const [products] = await database.execute<JsonRow[]>("SELECT product_data AS record_data FROM admin_metal_products ORDER BY created_at DESC");
     const [rateRequests] = await database.execute<JsonRow[]>("SELECT request_data AS record_data FROM admin_rate_requests ORDER BY requested_at DESC");
     const [makingCharges] = await database.execute<RowDataPacket[]>("SELECT metal, charge_per_gram_paise, enabled, updated_at FROM admin_metal_making_charges ORDER BY metal");
@@ -243,18 +250,6 @@ router.get("/state", async (request, response) => {
     );
 
     response.json({
-      customers: (permissions.customers ? customers : []).map((row) => ({
-        id: `CUS-${row.user_id}`,
-        name: row.full_name,
-        email: row.email ?? "",
-        phone: row.mobile ?? "",
-        city: row.city ?? "",
-        pan: row.pan ?? "",
-        joined: row.created_at,
-        kycStatus: row.verification_status === "VERIFIED" ? "Verified" : row.verification_status === "REJECTED" ? "Rejected" : row.verification_status === "IN_PROGRESS" ? "In review" : "Pending",
-        status: row.status === "ACTIVE" ? "Active" : "Suspended",
-        transactions: Number(row.transactions ?? 0),
-      })),
       products: (permissions.products ? products : []).map((row) => parseJson(row.record_data)),
       rateRequests: (permissions.products ? rateRequests : []).map((row) => parseJson(row.record_data)),
       metalMakingCharges: (permissions.products ? makingCharges : []).map((row) => ({
@@ -285,6 +280,23 @@ router.get("/state", async (request, response) => {
   } catch (error) {
     console.error("Admin console state lookup failed:", error);
     response.status(500).json({ message: "Could not load admin console data." });
+  }
+});
+
+router.get("/customers", requirePermission("customers"), async (_request, response) => {
+  try {
+    const [customers] = await database.execute<RowDataPacket[]>(
+      `SELECT u.user_id, u.full_name, u.email, u.mobile, u.status, u.verification_status, u.created_at,
+              p.city, p.pan,
+              (SELECT COUNT(*) FROM admin_orders o WHERE o.customer_user_id = u.user_id) AS transactions
+       FROM admin_customer_profiles p
+       INNER JOIN users u ON u.user_id = p.user_id
+       ORDER BY u.created_at DESC, u.user_id DESC`,
+    );
+    response.json(customers.map(customerRecord));
+  } catch (error) {
+    console.error("Admin customer list lookup failed:", error);
+    response.status(500).json({ message: "Could not load customer profiles." });
   }
 });
 
@@ -375,11 +387,15 @@ router.post("/reports", requirePermission("reports"), async (request, response) 
 
 router.post("/customers", requirePermission("customers"), async (request, response) => {
   const customer = request.body as Record<string, unknown>;
-  const connection = await database.getConnection();
+  let connection: PoolConnection | undefined;
   try {
+    connection = await database.getConnection();
     const name = requiredString(customer.name, "Name");
     const email = requiredString(customer.email, "Email").toLowerCase();
-    const phone = requiredString(customer.phone, "Phone");
+    const phone = requiredString(customer.phone, "Phone").replace(/\s+/g, "");
+    if (!/^\+?[0-9]{10,15}$/.test(phone)) {
+      throw new Error("Enter a phone number with 10 to 15 digits.");
+    }
     const city = requiredString(customer.city, "City");
     const pan = requiredString(customer.pan, "PAN").toUpperCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
@@ -399,13 +415,26 @@ router.post("/customers", requirePermission("customers"), async (request, respon
       "INSERT INTO user_verification (user_id, verification_type, status) VALUES (?, 'ADMIN_REVIEW', 'PENDING')",
       [userId],
     );
+    const [createdCustomers] = await connection.execute<RowDataPacket[]>(
+      `SELECT u.user_id, u.full_name, u.email, u.mobile, u.status, u.verification_status, u.created_at,
+              p.city, p.pan, 0 AS transactions
+       FROM admin_customer_profiles p
+       INNER JOIN users u ON u.user_id = p.user_id
+       WHERE u.user_id = ? LIMIT 1`,
+      [userId],
+    );
+    if (!createdCustomers[0]) throw new Error("Customer profile was not created.");
     await connection.commit();
-    response.status(201).json({ ...customer, id: `CUS-${userId}`, status: "Active", kycStatus: "Pending", transactions: 0 });
+    response.status(201).json(customerRecord(createdCustomers[0]));
   } catch (error) {
-    await connection.rollback().catch(() => undefined);
+    if (connection) {
+      await connection.rollback().catch((rollbackError: unknown) => {
+        console.error("Customer creation rollback failed:", rollbackError);
+      });
+    }
     requestError(response, error);
   } finally {
-    connection.release();
+    connection?.release();
   }
 });
 

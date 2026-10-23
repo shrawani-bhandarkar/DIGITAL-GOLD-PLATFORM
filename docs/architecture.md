@@ -2,7 +2,7 @@
 
 ## Applications
 
-- **Customer app (`apps/mobile`)** — Android-first React Native/Expo client for registration, verification, rates, buying/selling, holdings, redemption, SIPs, gifts, notifications, receipts, and support.
+- **Customer app (`customer-mobile-app`)** — Android-first React Native/Expo client with OTP sign-in, rates, buying/selling, holdings, redemption, SIPs, gifts, notifications, receipts, and support. `apps/mobile` remains a separate workspace scaffold.
 - **Operations panel (`apps/web`)** — React web client for role-restricted customer support, order/redeemption operations, rate approval, finance/reconciliation, reporting, configuration, and audit review.
 - **API (`apps/api`)** — Node.js/Express service. It is the trust boundary for authentication, authorization, validation, business rules, provider callbacks, ledger writes, and audit records.
 

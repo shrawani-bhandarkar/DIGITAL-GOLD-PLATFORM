@@ -4,6 +4,7 @@ import database from "./config/database";
 import adminRouter from "./modules/auth/protected-routes";
 import authRouter from "./modules/auth/routes";
 import adminConsoleRouter from "./modules/admin-console/routes";
+import customerAuthRouter, { customerProfileRouter } from "./modules/customer-auth/routes";
 
 const app = express();
 
@@ -15,6 +16,8 @@ app.use(
 );
 app.use(express.json());
 app.use("/api/auth", authRouter);
+app.use("/api/customer/auth", customerAuthRouter);
+app.use("/api/customer/me", customerProfileRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/admin/console", adminConsoleRouter);
 

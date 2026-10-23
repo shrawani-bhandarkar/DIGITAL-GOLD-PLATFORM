@@ -1,7 +1,8 @@
 # DigiGold customer app
 
-This is the existing Expo/React Native customer app. It currently runs in a
-clearly labelled frontend demo mode. Demo sign-in, illustrative rates,
+This is the existing Expo/React Native customer app. It uses backend
+customer sign-in alongside clearly labelled frontend demo data for features
+that do not yet have backend APIs. Illustrative rates,
 in-memory holdings and transaction records, and empty notification state are
 not production data. No SMS, backend request, payment, or real purchase, sale,
 redemption, SIP, or gift is performed in demo mode.
@@ -14,9 +15,10 @@ From this directory:
 npm start
 ```
 
-Use the Expo QR code or press `a` for an Android emulator. Demo sign-in accepts
-a valid Indian mobile number and the OTP shown on the verification screen.
-That OTP is for local UI demonstration only; it is not authentication.
+Use the Expo QR code or press `a` for an Android emulator. Backend sign-in
+requires an active customer record in the admin panel database. In API
+development mode, the backend-generated one-time code is shown on the
+verification screen. No fixed or local demo OTP is accepted by backend login.
 
 Added `@expo/vector-icons` for native action, rate-card, and bottom-navigation
 icons and `expo-linear-gradient` for the Gift Gold banner. Expo SDK, React
@@ -102,16 +104,25 @@ orders can be enabled.
 
 ## Data modes
 
-- Default: `EXPO_PUBLIC_DATA_MODE=demo`. Dashboard rates and starting portfolio
+- Default: `EXPO_PUBLIC_DATA_MODE=backend`. Dashboard rates and starting portfolio
   values are explicitly illustrative and are loaded from
   `src/services/demoData.js`. New sample transactions and portfolio updates
   live only in React state and start empty on each app session.
-- Backend: set `EXPO_PUBLIC_DATA_MODE=backend` and
-  `EXPO_PUBLIC_API_BASE_URL` to the approved API origin, then restart Expo.
-  Backend mode does not fall back to demo data. The routes in
-  `src/config/apiRoutes.js` are proposals only and must be confirmed before
-  connecting to an API. The generic API methods are scaffolding, not evidence
-  that those API endpoints exist or that their schemas are compatible.
+- Backend: set `EXPO_PUBLIC_API_BASE_URL` to the API origin, then restart Expo.
+  Backend mode does not fall back to demo sign-in or use local storage. The API
+  customer OTP routes are implemented; the other data routes are not all
+  available yet and remain separate from sign-in.
+
+For local development, set `NODE_ENV=development` for the API and apply
+`apps/api/src/modules/customer-auth/schema.sql` to `digital_gold_db`. The
+development OTP is exposed only by a development API response. Production OTP
+delivery requires an SMS provider, which is not configured in this project;
+the API returns an error rather than claiming a code was sent.
+
+In development, the app defaults to `http://10.0.2.2:4000` on the Android
+emulator and `http://localhost:4000` on iOS simulator/web. For a physical
+device, set `EXPO_PUBLIC_API_BASE_URL` to the development machine's LAN address
+before starting or restarting Expo.
 
 The app does not persist access tokens, store payment details, access the
 database directly, or call the admin panel. Admin visibility must come from the

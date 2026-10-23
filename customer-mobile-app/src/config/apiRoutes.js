@@ -1,4 +1,3 @@
-// Proposed routes only. Confirm paths, methods and schemas with the API owner.
 export const apiRoutes = {
   requestOtp: { method: 'POST', path: '/api/customer/auth/otp/request' },
   verifyOtp: { method: 'POST', path: '/api/customer/auth/otp/verify' },
