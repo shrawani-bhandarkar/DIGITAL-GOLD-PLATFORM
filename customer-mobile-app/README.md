@@ -95,7 +95,12 @@ silver, or platinum bullion image assets. Profile has dedicated read-only
 Account Details, KYC Status, Bank/Payment Settings, Security, and Help screens.
 Customer profile, KYC, bank/payment, and support integrations are not
 configured, so unknown information is shown as unavailable and no verified
-status is fabricated.
+status is fabricated. The KYC screen includes an identity/review walkthrough,
+with local Aadhaar/PAN number validation and a masked review. Full numbers stay
+in screen memory only; they are not persisted or submitted. Consent is not
+recorded and submission remains disabled until the backend/provider is
+integrated. KYC status and any action-required reason remain unavailable until
+the backend supplies them.
 
 All estimates are illustrative. The backend/provider must supply authoritative
 rates, product-specific making charges, the applicable tax base and

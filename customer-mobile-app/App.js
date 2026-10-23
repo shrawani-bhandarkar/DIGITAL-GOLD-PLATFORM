@@ -20,6 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import { apiConfig } from './src/config/apiConfig';
 import { Button, Brand, Card, ChoiceRow, DigiGoldHeader, DemoBadge, EmptyState, ErrorState, Field, LoadingState, Notice, SectionTitle, StatusBadge } from './src/components/UI';
+import KycScreen from './src/components/KycScreen';
 import { demoNotifications, demoPortfolio, demoProfile, demoRates } from './src/services/demoData';
 import { logout, requestOtp, verifyOtp } from './src/services/authService';
 import { setUnauthorizedHandler } from './src/services/apiClient';
@@ -1755,13 +1756,7 @@ function ProfileDetailScreen({ section, mobile, name, onLogout, busy, error }) {
         </Card>
       ) : null}
       {section === 'kyc' ? (
-        <Card style={styles.profileDetailCard}>
-          <DemoBadge label="STATUS UNAVAILABLE" />
-          <Text style={styles.cardTitle}>KYC status not available</Text>
-          <Text style={styles.bodyText}>
-            No KYC service is connected. This app does not mark the account as verified, and KYC submission is not available here.
-          </Text>
-        </Card>
+        <KycScreen />
       ) : null}
       {section === 'payment' ? (
         <Card style={styles.profileDetailCard}>
