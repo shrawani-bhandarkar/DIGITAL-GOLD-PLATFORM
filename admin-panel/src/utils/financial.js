@@ -37,6 +37,12 @@ export function parseMoneyPaise(value, label = 'Amount', allowZero = false) {
   return paise;
 }
 
+export function parseMoneyAmount(value, label = 'Amount', allowZero = false) {
+  const amount = parseDecimal(value, label, 2, allowZero);
+  if (!Number.isSafeInteger(Math.round(amount * 100))) throw new RangeError(`${label} is too large.`);
+  return amount;
+}
+
 export function parseQuantityMilliGrams(value, label = 'Quantity') {
   const grams = parseDecimal(value, label, 3);
   const milligrams = Math.round(grams * QUANTITY_SCALE);
@@ -95,15 +101,12 @@ function multiplyDivideRounded(left, right, divisor) {
   return Math.round(product / divisor);
 }
 
-export function calculateMakingChargePaise(quantityMilliGrams, chargePerGramPaise, enabled = true) {
-  if (!Number.isSafeInteger(quantityMilliGrams) || quantityMilliGrams <= 0) {
-    throw new RangeError('Purchase weight must be a positive whole number of milligrams.');
-  }
-  if (!Number.isSafeInteger(chargePerGramPaise) || chargePerGramPaise < 0) {
-    throw new RangeError('Making charge per gram must be a non-negative whole number of paise.');
+export function calculateMakingChargePaise(chargePaise, enabled = true) {
+  if (!Number.isSafeInteger(chargePaise) || chargePaise < 0) {
+    throw new RangeError('Fixed making charge per purchase must be a non-negative whole number of paise.');
   }
   if (typeof enabled !== 'boolean') throw new RangeError('Making charge status must be enabled or disabled.');
-  return enabled ? multiplyDivideRounded(quantityMilliGrams, chargePerGramPaise, QUANTITY_SCALE) : 0;
+  return enabled ? chargePaise : 0;
 }
 
 function chargeFor(basePaise, basisPoints) {
@@ -116,7 +119,7 @@ export function calculateBuyQuote({
   value,
   ratePerGram,
   feePolicy = DEMO_FEE_POLICY,
-  makingChargePerGramPaise = 0,
+  makingChargePaise: configuredMakingChargePaise = 0,
   makingChargeEnabled = false,
 }) {
   const ratePaise = parseRatePaise(ratePerGram);
@@ -134,8 +137,7 @@ export function calculateBuyQuote({
   }
 
   const makingChargePaise = calculateMakingChargePaise(
-    quantityMilliGrams,
-    makingChargePerGramPaise,
+    configuredMakingChargePaise,
     makingChargeEnabled,
   );
   const purchaseSubtotalPaise = addSafe(baseAmountPaise, makingChargePaise, 'Purchase subtotal');

@@ -11,6 +11,7 @@ import {
   deriveDashboardMetrics,
   formatGrams,
   formatPaise,
+  parseMoneyAmount,
   parseMoneyPaise,
   parseQuantityMilliGrams,
   productFeePolicy,
@@ -18,6 +19,11 @@ import {
 } from '../utils/financial.js';
 
 describe('integer-based demo financial calculations', () => {
+  it('parses a making charge in rupees without scaling the displayed value', () => {
+    expect(parseMoneyAmount('400')).toBe(400);
+    expect(parseMoneyAmount('400.25')).toBe(400.25);
+  });
+
   it('quotes amount- and quantity-based buys in paise and milligrams', () => {
     expect(calculateBuyQuote({ basis: 'amount', value: '100.00', ratePerGram: '30.00' })).toEqual({
       baseAmountPaise: 10000,
@@ -44,40 +50,39 @@ describe('integer-based demo financial calculations', () => {
     });
   });
 
-  it('calculates independent per-metal making charges using integer paise and milligrams', () => {
+  it('applies a fixed per-purchase making charge regardless of grams or investment amount', () => {
     const examples = [
-      { metal: 'Gold', weight: '1', rate: 7000, chargePaise: 25000, valuePaise: 700000, makingPaise: 25000, subtotalPaise: 725000 },
-      { metal: 'Silver', weight: '10', rate: 100, chargePaise: 1000, valuePaise: 100000, makingPaise: 10000, subtotalPaise: 110000 },
-      { metal: 'Platinum', weight: '1', rate: 4000, chargePaise: 30000, valuePaise: 400000, makingPaise: 30000, subtotalPaise: 430000 },
+      { metal: 'Gold', weight: '1', rate: 7000, chargePaise: 25000, valuePaise: 700000, subtotalPaise: 725000 },
+      { metal: 'Silver', weight: '10', rate: 100, chargePaise: 1000, valuePaise: 100000, subtotalPaise: 101000 },
+      { metal: 'Platinum', weight: '1', rate: 4000, chargePaise: 30000, valuePaise: 400000, subtotalPaise: 430000 },
     ];
     for (const example of examples) {
       expect(calculateBuyQuote({
         basis: 'quantity',
         value: example.weight,
         ratePerGram: example.rate,
-        makingChargePerGramPaise: example.chargePaise,
+        makingChargePaise: example.chargePaise,
         makingChargeEnabled: true,
       })).toMatchObject({
         baseAmountPaise: example.valuePaise,
-        makingChargePaise: example.makingPaise,
+        makingChargePaise: example.chargePaise,
         purchaseSubtotalPaise: example.subtotalPaise,
-        totalPaise: example.subtotalPaise,
       });
     }
     expect(calculateBuyQuote({
       basis: 'amount',
-      value: '7000',
+      value: '14000',
       ratePerGram: 7000,
-      makingChargePerGramPaise: 25000,
+      makingChargePaise: 25000,
       makingChargeEnabled: true,
-    })).toMatchObject({ quantityMilliGrams: 1000, makingChargePaise: 25000, purchaseSubtotalPaise: 725000 });
-    expect(calculateMakingChargePaise(333, 1000)).toBe(333);
-    expect(calculateMakingChargePaise(1000, 25000, false)).toBe(0);
+    })).toMatchObject({ quantityMilliGrams: 2000, makingChargePaise: 25000, purchaseSubtotalPaise: 1425000 });
+    expect(calculateMakingChargePaise(1000)).toBe(1000);
+    expect(calculateMakingChargePaise(25000, false)).toBe(0);
     expect(calculateBuyQuote({
       basis: 'quantity',
       value: '1',
       ratePerGram: 7000,
-      makingChargePerGramPaise: 25000,
+      makingChargePaise: 25000,
       makingChargeEnabled: false,
     })).toMatchObject({ makingChargePaise: 0, purchaseSubtotalPaise: 700000 });
   });
@@ -87,13 +92,12 @@ describe('integer-based demo financial calculations', () => {
       basis: 'quantity',
       value: '1',
       ratePerGram: 100,
-      makingChargePerGramPaise: 0,
+      makingChargePaise: 0,
       makingChargeEnabled: true,
     })).toMatchObject({ makingChargePaise: 0, purchaseSubtotalPaise: 10000 });
-    expect(() => calculateMakingChargePaise(0, 100)).toThrow(/positive/);
-    expect(() => calculateMakingChargePaise(1000, -1)).toThrow(/non-negative/);
-    expect(() => calculateMakingChargePaise(1000, 100.5)).toThrow(/non-negative/);
-    expect(() => calculateMakingChargePaise(1000, 100, 'enabled')).toThrow(/status/);
+    expect(() => calculateMakingChargePaise(-1)).toThrow(/non-negative/);
+    expect(() => calculateMakingChargePaise(100.5)).toThrow(/non-negative/);
+    expect(() => calculateMakingChargePaise(100, 'enabled')).toThrow(/status/);
   });
 
   it('calculates sell proceeds and redemption charges separately', () => {

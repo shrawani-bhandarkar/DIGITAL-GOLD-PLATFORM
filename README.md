@@ -37,6 +37,16 @@ npm run dev:mobile
 ```
 
 `npm run dev:mobile` starts the customer app in `customer-mobile-app`. Use Expo Go or an Android emulator to open it. Generate native Android project files only when needed with `npx expo prebuild --platform android` from `customer-mobile-app`.
+To start the customer app directly on an Android emulator from the repository
+root, run:
+
+```powershell
+npm run dev:mobile:android
+```
+
+Alternatively, from `customer-mobile-app`, run `npm run android:emulator`. Do
+not start Expo from the repository root; it is a workspace container, not an
+Expo app.
 
 ## API database
 
@@ -53,6 +63,31 @@ Set `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` in `apps/api/.
 mysql -u root -p digital_gold_db < apps\api\src\modules\admin-console\schema.sql
 mysql -u root -p digital_gold_db < apps\api\src\modules\customer-auth\schema.sql
 ```
+
+For an existing database, apply the customer identity and ID-generation
+migration after the admin-console schema:
+
+```powershell
+mysql -u root -p digital_gold_db < apps\api\src\modules\admin-console\migrations\002-customer-identifiers-and-sequence.sql
+```
+
+It enables auto-increment IDs for `users.user_id` (starting at 1 for an empty
+table, and continuing after the current maximum for existing data) and adds
+unique constraints for customer email, phone, and PAN. Resolve any existing
+duplicate values before applying the migration.
+
+For existing installations, apply the purchase-quantity precision migration
+to support exact amount-based Silver and Platinum quotes:
+
+```powershell
+mysql -u root -p digital_gold_db < apps\api\src\modules\admin-console\migrations\003-precise-purchase-quantities.sql
+```
+
+The admin-console schema includes the daily metal-price history table used by
+the customer app's Current Metal Rates section. Super Admins can publish Gold,
+Silver, and Platinum prices and purity from Rate management in the admin panel;
+the public market-rates API returns the newest price effective as of the current
+UTC date.
 
 Customer OTP requests are accepted only for active customer records created in the admin panel. In API development mode the OTP is returned to the app for local testing; production SMS delivery is not configured.
 

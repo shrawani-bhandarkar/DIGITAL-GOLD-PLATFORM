@@ -286,7 +286,16 @@ router.post("/logout", requireCustomer, async (request: Request, response: Respo
 
 customerProfileRouter.get("/", requireCustomer, (request: Request, response: Response) => {
   const customerRequest = request as AuthenticatedCustomerRequest;
-  response.json({ profile: customerRequest.customer });
+  const { id, name, mobileNumber, email } = customerRequest.customer;
+  response.setHeader("Cache-Control", "no-store");
+  response.json({
+    profile: {
+      id: `CUS-${id}`,
+      name,
+      mobileNumber,
+      email,
+    },
+  });
 });
 
 export default router;

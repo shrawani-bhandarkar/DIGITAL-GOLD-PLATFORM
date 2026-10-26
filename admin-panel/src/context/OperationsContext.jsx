@@ -79,7 +79,7 @@ export function OperationsProvider() {
       if (!saved) return false;
       if (saved.payment) setPayments((items) => items.map((payment) => payment.id === saved.payment.id ? saved.payment : payment));
       setOrders((items) => items.map((item) => item.id === id
-        ? { ...item, status, timeline: addTimelineEntry(item, `Order ${status.toLowerCase()}`, true), updatedAt: nowLabel() }
+        ? { ...item, status, paymentStatus: saved.payment?.status ?? item.paymentStatus, timeline: addTimelineEntry(item, `Order ${status.toLowerCase()}`, true), updatedAt: nowLabel() }
         : item));
       recordAudit({ action: `Updated order to ${status}`, category: 'Orders', target: id, detail: 'Order status persisted.' });
       return true;

@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test tests/credentials.test.ts tests/tokens.test.ts tests/admin-financial.test.ts tests/customer-auth.test.ts",
+    "test": "node --import tsx --test tests/credentials.test.ts tests/tokens.test.ts tests/admin-financial.test.ts tests/customer-auth.test.ts tests/customer-orders.test.ts tests/metal-prices.test.ts tests/metal-prices-routes.test.ts tests/admin-product-data.test.ts tests/customer-validation.test.ts",
     "create:admin": "tsx scripts/create-admin.ts",
     "seed:admin": "tsx scripts/seed-admin.ts"
   },

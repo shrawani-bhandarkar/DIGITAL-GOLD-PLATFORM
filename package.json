@@ -12,6 +12,7 @@
     "dev:web": "npm run dev --workspace @digi-gold/web",
     "dev:api": "npm run dev --workspace @digi-gold/api",
     "dev:mobile": "npm --prefix customer-mobile-app start",
+    "dev:mobile:android": "npm --prefix customer-mobile-app run android:emulator",
     "build": "npm run build --workspace @digi-gold/api && npm run build --workspace @digi-gold/web",
     "typecheck": "npm run typecheck --workspace @digi-gold/api && npm run typecheck --workspace @digi-gold/web"
   },

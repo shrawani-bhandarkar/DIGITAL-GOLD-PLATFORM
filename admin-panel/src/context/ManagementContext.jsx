@@ -12,6 +12,7 @@ export function ManagementProvider() {
   const [products, setProducts] = useState([]);
   const [rateRequests, setRateRequests] = useState([]);
   const [metalMakingCharges, setMetalMakingCharges] = useState([]);
+  const [metalTaxSettings, setMetalTaxSettings] = useState(null);
   const [ledgerEntries, setLedgerEntries] = useState([]);
 
   useEffect(() => {
@@ -45,7 +46,8 @@ export function ManagementProvider() {
     setRateRequests(consoleState.rateRequests ?? []);
     const configuredCharges = consoleState.metalMakingCharges ?? [];
     setMetalMakingCharges(SUPPORTED_METALS.map((metal) => configuredCharges.find((item) => item.metal === metal)
-      ?? { metal, chargePerGramPaise: 0, enabled: false, updatedAt: 'Not configured' }));
+      ?? { metal, chargePerPurchase: 0, enabled: false, updatedAt: 'Not configured' }));
+    setMetalTaxSettings(consoleState.metalTaxSettings ?? null);
     setLedgerEntries(consoleState.ledgerEntries ?? []);
   }, [consoleState]);
 
@@ -60,41 +62,74 @@ export function ManagementProvider() {
     }
   }
 
-  async function updateMetalMakingCharge(metal, chargePerGramPaise, enabled) {
-    if (activeRoleId !== 'SUPER_ADMIN') {
-      return { success: false, message: 'Only Super Admin can configure metal making charges.' };
+  async function updateMetalMakingCharge(metal, chargePerPurchase, enabled) {
+    if (!hasPermission('products')) {
+      return { success: false, message: 'You do not have permission to configure metal making charges.' };
     }
     if (!SUPPORTED_METALS.includes(metal)) {
       return { success: false, message: 'Choose a supported metal.' };
     }
-    if (!Number.isSafeInteger(chargePerGramPaise) || chargePerGramPaise < 0 || typeof enabled !== 'boolean') {
-      return { success: false, message: 'Making charge must be a non-negative amount and have an explicit status.' };
+    if (!Number.isFinite(chargePerPurchase) || chargePerPurchase < 0 || !Number.isSafeInteger(Math.round(chargePerPurchase * 100)) || typeof enabled !== 'boolean') {
+      return { success: false, message: 'Fixed making charge per purchase must be a non-negative amount and have an explicit status.' };
     }
-    const updatedAt = new Date().toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      timeZone: 'UTC',
-    });
     try {
-      const saved = await persist(`/api/admin/console/making-charges/${encodeURIComponent(metal)}`, {
+      const result = await apiRequest(`/api/admin/console/making-charges/${encodeURIComponent(metal)}`, {
         method: 'PUT',
-        body: { chargePerGramPaise, enabled },
+        body: { chargePerPurchase: chargePerPurchase.toFixed(2), enabled },
       });
-      if (!saved) return { success: false, message: 'Could not save the making charge.' };
-    } catch (error) { return { success: false, message: error.message }; }
-    const nextCharges = metalMakingCharges.some((item) => item.metal === metal)
-      ? metalMakingCharges.map((item) => item.metal === metal
-      ? { ...item, chargePerGramPaise, enabled, updatedAt }
-      : item)
-      : [...metalMakingCharges, { metal, chargePerGramPaise, enabled, updatedAt }];
-    setMetalMakingCharges(nextCharges);
-    setPersistenceError('');
+      if (
+        result?.success !== true
+        || result.makingCharge?.metal !== metal
+        || result.makingCharge.chargePerPurchase !== chargePerPurchase
+        || result.makingCharge.enabled !== enabled
+      ) {
+        throw new Error('The database did not confirm the saved making charge.');
+      }
+      setPersistenceError('');
+      const saved = result.makingCharge;
+      const nextCharges = metalMakingCharges.some((item) => item.metal === metal)
+        ? metalMakingCharges.map((item) => (item.metal === metal ? saved : item))
+        : [...metalMakingCharges, saved];
+      setMetalMakingCharges(nextCharges);
+      recordAudit({
+        action: 'Updated metal making charge',
+        category: 'Products',
+        target: metal,
+        detail: `${metal} making charge saved as ${enabled ? 'enabled' : 'disabled'} in MySQL.`,
+      });
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save the making charge.';
+      setPersistenceError(message);
+      return { success: false, message };
+    }
+  }
+
+  async function updateMetalTaxSettings(settings) {
+    if (!hasPermission('products')) {
+      return { success: false, message: 'You do not have permission to configure metal GST.' };
+    }
+    const { sellerStateCode, cgstBps, sgstBps, igstBps } = settings;
+    if (
+      typeof sellerStateCode !== 'string'
+      || ![cgstBps, sgstBps, igstBps].every((rate) => Number.isSafeInteger(rate) && rate >= 0 && rate <= 10_000)
+      || cgstBps !== sgstBps
+      || cgstBps + sgstBps !== igstBps
+    ) {
+      return { success: false, message: 'CGST and SGST must be equal, and IGST must equal their combined rate.' };
+    }
+    const saved = await persist('/api/admin/console/metal-tax-settings', {
+      method: 'PUT',
+      body: settings,
+    });
+    if (!saved) return { success: false, message: 'Could not save GST settings.' };
+    const nextSettings = { sellerStateCode, cgstBps, sgstBps, igstBps, updatedAt: new Date().toISOString() };
+    setMetalTaxSettings(nextSettings);
     recordAudit({
-      action: 'Updated metal making charge',
+      action: 'Updated metal GST settings',
       category: 'Products',
-      target: metal,
-      detail: `${metal} making charge configured as ${enabled ? 'enabled' : 'disabled'} in demo settings.`,
+      target: 'Metal purchases',
+      detail: `Saved CGST, SGST, IGST rates and seller state ${sellerStateCode} in MySQL.`,
     });
     return { success: true };
   }
@@ -105,14 +140,22 @@ export function ManagementProvider() {
     products,
     rateRequests,
     metalMakingCharges,
+    metalTaxSettings,
     ledgerEntries,
     updateMetalMakingCharge,
+    updateMetalTaxSettings,
     addCustomer: async (customer) => {
-      const saved = await persist('/api/admin/console/customers', { method: 'POST', body: customer });
-      if (!saved) return null;
+      let saved;
+      try {
+        saved = await apiRequest('/api/admin/console/customers', { method: 'POST', body: customer });
+        setPersistenceError('');
+      } catch (error) {
+        setPersistenceError(error.message);
+        return { error: error.message };
+      }
       setCustomers((items) => [saved, ...items]);
       recordAudit({ action: 'Created customer profile', category: 'Customers', target: saved.id, detail: 'Customer profile created with pending KYC.' });
-      return saved;
+      return { customer: saved };
     },
     updateCustomer: async (id, updates) => {
       const saved = await persist(`/api/admin/console/customers/${encodeURIComponent(id)}`, { method: 'PATCH', body: updates });

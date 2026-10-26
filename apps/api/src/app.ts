@@ -5,6 +5,10 @@ import adminRouter from "./modules/auth/protected-routes";
 import authRouter from "./modules/auth/routes";
 import adminConsoleRouter from "./modules/admin-console/routes";
 import customerAuthRouter, { customerProfileRouter } from "./modules/customer-auth/routes";
+import customerActivityRouter from "./modules/customer-activity/routes";
+import customerOrdersRouter from "./modules/customer-orders/routes";
+import marketRatesRouter from "./modules/rates/routes";
+import metalPricesRouter from "./modules/metal-prices/routes";
 
 const app = express();
 
@@ -18,7 +22,11 @@ app.use(express.json());
 app.use("/api/auth", authRouter);
 app.use("/api/customer/auth", customerAuthRouter);
 app.use("/api/customer/me", customerProfileRouter);
+app.use("/api/customer/orders", customerOrdersRouter);
+app.use("/api/customer", customerActivityRouter);
+app.use("/api/market", marketRatesRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/admin/metal-prices", metalPricesRouter);
 app.use("/api/admin/console", adminConsoleRouter);
 
 app.get("/api/health", (_request, response) => {

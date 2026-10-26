@@ -24,7 +24,14 @@ import KycScreen from './src/components/KycScreen';
 import { demoNotifications, demoPortfolio, demoProfile, demoRates } from './src/services/demoData';
 import { logout, requestOtp, verifyOtp } from './src/services/authService';
 import { setUnauthorizedHandler } from './src/services/apiClient';
-import { fetchPortfolio, fetchRates, fetchTransactions } from './src/services/customerServices';
+import {
+  createPurchaseQuote,
+  fetchPortfolio,
+  fetchProfile,
+  fetchRates,
+  fetchTransactions,
+  submitConfirmedPurchase,
+} from './src/services/customerServices';
 import {
   calculateBuyEstimate,
   calculateSellEstimate,
@@ -211,7 +218,7 @@ function OtpScreen({ mobile, otp, setOtp, developmentOtp, error, busy, seconds, 
           </Card>
           {__DEV__ && developmentOtp ? (
             <Notice type="warning" style={styles.authNotice}>
-              Development OTP: {developmentOtp}
+              OTP: {developmentOtp}
             </Notice>
           ) : (
             <Notice style={styles.authNotice}>Enter the verification code sent to your registered mobile number.</Notice>
@@ -250,15 +257,16 @@ function getResponseCollection(payload, keys, label) {
 
 function normalizeBackendRate(rate) {
   if (!rate || typeof rate !== 'object') return null;
-  const rawMetal = String(rate.metalId || rate.id || rate.metal || rate.name || '').toLowerCase();
-  const id = ['gold', 'silver', 'platinum'].find((metal) => rawMetal.includes(metal));
+  const rawMetalId = String(rate.metalId || rate.id || rate.metal || rate.name || '');
+  const normalizedMetalId = rawMetalId.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const id = ['gold', 'silver', 'platinum'].find((metal) => normalizedMetalId.includes(metal))
+    || normalizedMetalId;
   if (!id) return null;
-  const configuredMetal = demoRates.find((item) => item.id === id);
   const rawRate = rate.ratePerGram ?? rate.rate_per_gram;
   const ratePerGram = Number(rawRate);
   return {
     id,
-    metal: configuredMetal.metal,
+    metal: String(rate.metal || rate.name || rawMetalId).trim(),
     purity: typeof rate.purity === 'string' || typeof rate.purity === 'number' ? String(rate.purity) : '',
     ratePerGram: Number.isFinite(ratePerGram) && ratePerGram > 0 ? ratePerGram : null,
     source: 'Backend',
@@ -284,6 +292,9 @@ function normalizeBackendActivity(item, index) {
   const rawMetal = String(item.metalId || item.metal || item.asset || '').toLowerCase();
   const metalId = ['gold', 'silver', 'platinum'].find((metal) => rawMetal.includes(metal)) || '';
   const configuredMetal = demoRates.find((rate) => rate.id === metalId);
+  const metalName = typeof item.metal === 'string' && item.metal.trim()
+    ? item.metal.trim()
+    : configuredMetal?.metal || '';
   const rawAmount = item.amount ?? item.totalAmount ?? item.amountInr;
   const amount = rawAmount === undefined || rawAmount === null || rawAmount === ''
     ? null
@@ -298,7 +309,7 @@ function normalizeBackendActivity(item, index) {
     ? item.title
     : type === 'other' && rawType
       ? rawType.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-      : `${presentation.title}${configuredMetal ? ` ${configuredMetal.metal}` : ''}`;
+      : `${presentation.title}${metalName ? ` ${metalName}` : ''}`;
   const normalizedDate = typeof createdAt === 'number' && Number.isFinite(createdAt)
     ? new Date(createdAt).toISOString()
     : typeof createdAt === 'string'
@@ -311,7 +322,7 @@ function normalizeBackendActivity(item, index) {
     type,
     title: itemTitle,
     metal: metalId,
-    metalName: configuredMetal?.metal || (typeof item.metal === 'string' ? item.metal : ''),
+    metalName,
     amount: Number.isFinite(amount) && amount >= 0 ? amount : null,
     quantity: Number.isFinite(quantity) && quantity >= 0 ? quantity : null,
     createdAt: normalizedDate,
@@ -441,6 +452,7 @@ function HomeScreen({
   quickBuyMetalId,
   quickBuyExpanded,
   onQuickBuyToggle,
+  onQuickBuyMetalSelect,
   rates,
   ratesLoading,
   ratesError,
@@ -482,34 +494,41 @@ function HomeScreen({
               rate={rate}
               compact
               selected={rate.id === quickBuyMetalId}
-              onPress={() => onRateSelect(rate)}
+              onPress={['gold', 'silver', 'platinum'].includes(rate.id) ? () => onRateSelect(rate) : undefined}
               width={rateCardWidth}
             />
           ))}
         </View>
       )}
       {!ratesLoading && !ratesError && rates.length === 0 ? (
-        <EmptyState title="Rates unavailable" body="No current metal rates are available." symbol="◈" />
-      ) : null}
-      <View onLayout={onQuickBuyLayout}>
-        <QuickBuyCalculator
-          rates={rates}
-          ratesLoading={ratesLoading}
-          ratesError={ratesError}
-          selectedMetalId={quickBuyMetalId}
-          expanded={quickBuyExpanded}
-          onToggle={onQuickBuyToggle}
-          onBuy={(draft) => onQuickBuy(draft)}
-          purchaseAvailable={apiConfig.mode === 'demo'}
+        <EmptyState
+          title="No current metal rates"
+          body="Rates will appear here when active metal products have a published price."
+          symbol="◈"
         />
-      </View>
+      ) : null}
+      {(apiConfig.mode === 'demo' || ratesLoading || ratesError || rates.length > 0) ? (
+        <View onLayout={onQuickBuyLayout}>
+          <QuickBuyCalculator
+            rates={rates}
+            ratesLoading={ratesLoading}
+            ratesError={ratesError}
+            selectedMetalId={quickBuyMetalId}
+            expanded={quickBuyExpanded}
+            onToggle={onQuickBuyToggle}
+            onBuy={(draft) => onQuickBuy(draft)}
+            purchaseAvailable={apiConfig.mode === 'demo'}
+            backendMode={apiConfig.mode === 'backend'}
+          />
+        </View>
+      ) : null}
       <SectionTitle title="Explore DigiGold" />
       <Text style={styles.exploreSectionDescription}>
         Discover a smarter way to own and manage precious metals.
       </Text>
       {apiConfig.mode === 'backend' ? (
         <Notice type="warning" style={styles.sectionNotice}>
-          Buy, sell, SIP, redemption and gift actions remain disabled until their backend transaction flow is connected.
+          Sell, SIP, redemption and gift actions remain disabled until their backend transaction flow is connected.
         </Notice>
       ) : null}
       <View style={[styles.actionsGrid, { columnGap, rowGap: 10 }]}>
@@ -560,7 +579,11 @@ function RecentActivity({ activities, loading, error, onRetry, onViewAll }) {
           </TouchableOpacity>
         </View>
       ) : activities.length === 0 ? (
-        <Text style={styles.noRecentActivity}>No recent activity yet.</Text>
+        <EmptyState
+          title="No recent activity yet"
+          body="Your account activity will appear here when a transaction is recorded."
+          symbol="↔"
+        />
       ) : (
         <Card style={styles.recentActivityCard}>
           {activities.slice(0, 3).map((activity) => (
@@ -724,6 +747,8 @@ function BuyEstimateSummary({ estimate }) {
   );
 }
 
+const DEFAULT_BILLING_STATE_CODE = 'MH';
+
 function QuickBuyCalculator({
   rates,
   ratesLoading,
@@ -733,18 +758,27 @@ function QuickBuyCalculator({
   onToggle,
   onBuy,
   purchaseAvailable,
+  backendMode,
 }) {
   const [mode, setMode] = useState('amount');
+  const stateCode = DEFAULT_BILLING_STATE_CODE;
   const [valuesByMode, setValuesByMode] = useState({ amount: '', grams: '' });
   const [validationError, setValidationError] = useState('');
   const [purchaseError, setPurchaseError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [quote, setQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+  const [purchaseResult, setPurchaseResult] = useState(null);
+  const quoteSequence = useRef(0);
+  const idempotencyKey = useRef('');
   const value = valuesByMode[mode];
   const selectedRate = rates.find((rate) => rate.id === selectedMetalId);
   const rateAvailable = Number.isFinite(selectedRate?.ratePerGram) && selectedRate.ratePerGram > 0;
   let estimate = null;
   let estimateError = '';
-  if (value.trim() && rateAvailable) {
+  if (!backendMode && value.trim() && rateAvailable) {
     try {
       estimate = calculateBuyEstimate({
         metalId: selectedMetalId,
@@ -757,13 +791,43 @@ function QuickBuyCalculator({
     }
   }
 
+  useEffect(() => {
+    const sequence = ++quoteSequence.current;
+    if (!backendMode || !expanded || !value.trim() || !Number.isFinite(Number(value)) || Number(value) <= 0 || !rateAvailable) {
+      setQuote(null);
+      setQuoteLoading(false);
+      setQuoteError('');
+      return undefined;
+    }
+
+    setQuote(null);
+    setQuoteLoading(true);
+    setQuoteError('');
+    async function refreshQuote() {
+      try {
+        const result = await createPurchaseQuote({ metalId: selectedMetalId, mode, value, stateCode });
+        if (!result?.quote || sequence !== quoteSequence.current) return;
+        setQuote(result.quote);
+      } catch (error) {
+        if (sequence === quoteSequence.current) setQuoteError(error.message);
+      } finally {
+        if (sequence === quoteSequence.current) setQuoteLoading(false);
+      }
+    }
+    refreshQuote();
+    return () => {
+      quoteSequence.current += 1;
+    };
+  }, [backendMode, expanded, mode, rateAvailable, selectedMetalId, selectedRate?.purity, selectedRate?.ratePerGram, stateCode, value]);
+
   const updateValue = (next) => {
     setValuesByMode((current) => ({ ...current, [mode]: sanitizeDecimalInput(next) }));
     setValidationError('');
     setPurchaseError('');
+    setPurchaseResult(null);
   };
-  const submit = () => {
-    if (submitting) return;
+  const submit = async () => {
+    if (submitting || quoteLoading) return;
     setPurchaseError('');
     if (!rateAvailable) {
       setValidationError('A valid rate is not available for this metal.');
@@ -787,6 +851,30 @@ function QuickBuyCalculator({
       );
       return;
     }
+    if (backendMode) {
+      setValidationError('');
+      setPurchaseError('');
+      setPurchaseResult(null);
+      Keyboard.dismiss();
+      setQuoteLoading(true);
+      setQuoteError('');
+      const sequence = ++quoteSequence.current;
+      try {
+        const result = await createPurchaseQuote({ metalId: selectedMetalId, mode, value, stateCode });
+        if (sequence !== quoteSequence.current) return;
+        if (!result?.quote) throw new Error('The service did not return a current purchase quote.');
+        setQuote(result.quote);
+        setReviewing(true);
+      } catch (error) {
+        if (sequence === quoteSequence.current) {
+          setQuoteError(error.message);
+          setValidationError(error.message || 'Could not load the latest purchase quote.');
+        }
+      } finally {
+        if (sequence === quoteSequence.current) setQuoteLoading(false);
+      }
+      return;
+    }
     if (estimateError || !estimate) {
       setValidationError(estimateError || 'Enter a valid amount or quantity.');
       return;
@@ -800,12 +888,58 @@ function QuickBuyCalculator({
     setSubmitting(true);
     onBuy({ metalId: selectedMetalId, mode, value, estimate });
   };
+  const confirmPurchase = async () => {
+    if (submitting || !quote) return;
+    if (!idempotencyKey.current) {
+      idempotencyKey.current = `quickbuy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+    }
+    setSubmitting(true);
+    setPurchaseError('');
+    try {
+      const result = await onBuy({
+        metalId: selectedMetalId,
+        mode,
+        value,
+        stateCode,
+        quoteToken: quote.quoteToken,
+        idempotencyKey: idempotencyKey.current,
+      });
+      if (!result?.order?.id || !result?.payment?.status) {
+        throw new Error('The service did not confirm the saved order and payment status. Retry to safely check this order.');
+      }
+      setPurchaseResult(result);
+      setReviewing(false);
+      idempotencyKey.current = '';
+    } catch (error) {
+      if (error.status === 409 && /quote expired|current rates or charges changed/i.test(error.message)) {
+        setReviewing(false);
+        idempotencyKey.current = '';
+        setPurchaseError(error.message);
+        setQuoteLoading(true);
+        const sequence = ++quoteSequence.current;
+        try {
+          const updated = await createPurchaseQuote({ metalId: selectedMetalId, mode, value, stateCode });
+          if (sequence === quoteSequence.current) setQuote(updated.quote);
+        } catch (quoteRefreshError) {
+          if (sequence === quoteSequence.current) setQuoteError(quoteRefreshError.message);
+        } finally {
+          if (sequence === quoteSequence.current) setQuoteLoading(false);
+        }
+      } else {
+        setPurchaseError(error.message || 'Could not submit the purchase. Retry to safely check its status.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
   const updateMode = (nextMode) => {
+    if (reviewing) return;
     setMode(nextMode);
     setValidationError('');
     setPurchaseError('');
+    setPurchaseResult(null);
   };
-  const activeError = validationError || (estimateError && value.trim() ? estimateError : '');
+  const activeError = validationError || (backendMode ? quoteError : estimateError && value.trim() ? estimateError : '');
   const modeShortcuts = mode === 'amount'
     ? ['500', '1000', '2000', '5000']
     : ['0.5', '1', '2', '5', '10'];
@@ -872,6 +1006,7 @@ function QuickBuyCalculator({
               accessibilityState={{ selected }}
               key={option.value}
               onPress={() => updateMode(option.value)}
+              disabled={reviewing}
               style={[styles.quickBuyModeOption, selected && styles.quickBuyModeOptionSelected]}
             >
               <Text style={[styles.quickBuyModeText, selected && styles.quickBuyModeTextSelected]}>
@@ -895,6 +1030,7 @@ function QuickBuyCalculator({
           returnKeyType="done"
           style={styles.quickBuyInput}
           value={value}
+          editable={!reviewing}
         />
         <Text style={styles.quickBuyInputUnit}>{mode === 'amount' ? 'INR' : 'grams'}</Text>
       </View>
@@ -914,17 +1050,55 @@ function QuickBuyCalculator({
           </TouchableOpacity>
         ))}
       </View>
-      {estimate ? (
+      {backendMode && quoteLoading ? (
+        <View style={styles.quickBuyRateState}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={styles.dataLoadingText}>Calculating a current server quote…</Text>
+        </View>
+      ) : null}
+      {(backendMode ? quote : estimate) ? (
         <>
           <View style={styles.quickBuySummary}>
-            <SummaryRow label="Selected metal" value={selectedRate.metal} />
-            <SummaryRow label="Rate per gram" value={`${formatINR(estimate.ratePerGram)} / g`} />
-            <SummaryRow label="Estimated quantity" value={`${estimate.quantityGrams.toFixed(6)} g`} />
-            <SummaryRow label="Estimated metal value" value={formatINR(estimate.metalValue)} />
-            <SummaryRow label="Making charges" value="Not configured" />
-            <SummaryRow label="Taxes" value="Not configured" />
+            <SummaryRow compact label="Selected metal" value={backendMode ? quote.metal : selectedRate.metal} />
+            <SummaryRow compact
+              label="Rate per gram"
+              value={`${formatINR(backendMode ? quote.ratePerGram : estimate.ratePerGram)} / g`}
+            />
+            <SummaryRow compact
+              label="Estimated quantity"
+              value={`${(backendMode ? quote.quantityGrams : estimate.quantityGrams).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')} g`}
+            />
+            {(backendMode ? quote.mode : estimate.mode) === 'amount' && selectedMetalId !== 'gold' ? (
+              <SummaryRow compact
+                label="Investment amount"
+                value={formatINR(Number(backendMode ? quote.inputValue : estimate.enteredValue))}
+              />
+            ) : null}
+            <SummaryRow compact
+              label="Estimated metal value"
+              value={formatINR(backendMode ? quote.metalValue : estimate.metalValue)}
+            />
+            <SummaryRow compact
+              label="Making charges"
+              value={backendMode
+                ? quote.makingChargeConfigured
+                  ? formatINR(quote.makingCharges)
+                  : 'Not configured'
+                : 'Not configured'}
+            />
+            <SummaryRow compact
+              label="Taxes"
+              value={!backendMode
+                ? 'Not configured'
+                : quote.taxJurisdiction === 'intra-state'
+                  ? `${formatINR(quote.taxBreakdown.total)} (CGST ${formatINR(quote.taxBreakdown.cgst)} + SGST ${formatINR(quote.taxBreakdown.sgst)})`
+                  : `${formatINR(quote.taxBreakdown.total)} (IGST ${formatINR(quote.taxBreakdown.igst)})`}
+            />
             <View style={styles.quickBuyTotal}>
-              <SummaryRow label="Estimated payable · configured charges excluded" value={formatINR(estimate.totalEstimate)} />
+              <SummaryRow compact
+                label={backendMode ? 'Estimated payable' : 'Estimated payable · configured charges excluded'}
+                value={formatINR(backendMode ? quote.totalAmount : estimate.totalEstimate)}
+              />
             </View>
           </View>
         </>
@@ -940,17 +1114,39 @@ function QuickBuyCalculator({
         </Notice>
       ) : null}
       {purchaseError ? <Notice type="error" style={styles.quickBuyNotice}>{purchaseError}</Notice> : null}
+      {purchaseResult ? (
+        <Notice type="warning" style={styles.quickBuyNotice}>
+          Order {purchaseResult.order.id} is {purchaseResult.order.status}. Payment is {purchaseResult.payment.status}; no payment was collected because a gateway is not configured.
+        </Notice>
+      ) : null}
+      {reviewing && backendMode && quote ? (
+        <View style={styles.quickBuySummary}>
+          <Notice type="warning" style={styles.quickBuyNotice}>
+            Confirm order for {formatINR(quote.totalAmount)}. The order will be saved with payment Pending; no funds will be charged.
+          </Notice>
+          <Button
+            title={submitting ? 'Submitting order…' : purchaseError ? 'Retry order submission' : 'Confirm & place order'}
+            onPress={confirmPurchase}
+            loading={submitting}
+            disabled={submitting}
+            style={styles.formButton}
+          />
+          {!submitting && !purchaseError ? (
+            <Button title="Cancel review" onPress={() => setReviewing(false)} style={styles.formButton} />
+          ) : null}
+        </View>
+      ) : null}
       <Button
         title="Buy Now"
         onPress={submit}
         loading={submitting}
-        disabled={submitting || ratesLoading || !rateAvailable}
+        disabled={submitting || reviewing || ratesLoading || !rateAvailable || (backendMode && quoteLoading)}
         style={styles.formButton}
       />
       <Text style={styles.calculationNote}>
         {purchaseAvailable
           ? 'Demo only · continuing opens the existing local purchase review; no payment is made.'
-          : 'Estimate only · the backend purchase quote and review flow are not connected. No order is sent.'}
+          : 'Live database quote · confirming saves a pending order; no payment is taken until a gateway is configured.'}
       </Text>
       </>
       ) : null}
@@ -1739,7 +1935,7 @@ function ProfileScreen({ onOpenSection, onLogout }) {
   );
 }
 
-function ProfileDetailScreen({ section, mobile, name, onLogout, busy, error }) {
+function ProfileDetailScreen({ section, mobile, name, profile, profileLoading, profileError, onRetryProfile, onLogout, busy, error }) {
   const current = profileSections.find((item) => item.id === section);
   const maskedNumber = mobile ? `+91 ••••••${mobile.slice(-4)}` : 'Not available';
   return (
@@ -1748,10 +1944,29 @@ function ProfileDetailScreen({ section, mobile, name, onLogout, busy, error }) {
       {section === 'account' ? (
         <Card style={styles.profileDetailCard}>
           {apiConfig.mode === 'demo' ? <DemoBadge label="DEMO ACCOUNT" /> : null}
-          <SummaryRow label="Name" value={name || 'Not available'} />
-          <SummaryRow label="Registered mobile" value={maskedNumber} />
-          <SummaryRow label="Email" value="Not available" />
-          <SummaryRow label="Customer ID" value="Not available" />
+          {profileLoading ? (
+            <View style={styles.quickBuyRateState}>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={styles.dataLoadingText}>Loading registered account details…</Text>
+            </View>
+          ) : null}
+          {profileError ? (
+            <>
+              <Notice type="error" style={styles.formNotice}>{profileError}</Notice>
+              <TouchableOpacity accessibilityRole="button" onPress={onRetryProfile} style={styles.retryLink}>
+                <Text style={styles.retryLinkText}>Retry</Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
+          <SummaryRow label="Name" value={profile?.name || name || 'Not available'} />
+          <SummaryRow
+            label="Registered mobile"
+            value={apiConfig.mode === 'backend'
+              ? profile?.mobileNumber || 'Not available'
+              : maskedNumber}
+          />
+          <SummaryRow label="Email" value={profile?.email || 'Not available'} />
+          <SummaryRow label="Customer ID" value={profile?.id || 'Not available'} />
           <Text style={styles.bodyText}>Account details are read-only; no profile editing service is configured.</Text>
         </Card>
       ) : null}
@@ -1826,11 +2041,11 @@ function BackendSetupScreen({ onLogout, busy }) {
   );
 }
 
-function SummaryRow({ label, value }) {
+function SummaryRow({ label, value, compact = false }) {
   return (
-    <View style={styles.summaryRow}>
-      <Text style={styles.summaryLabel}>{label}</Text>
-      <Text style={styles.summaryValue}>{value}</Text>
+    <View style={compact ? styles.quickBuySummaryRow : styles.summaryRow}>
+      <Text style={compact ? styles.quickBuySummaryLabel : styles.summaryLabel}>{label}</Text>
+      <Text style={compact ? styles.quickBuySummaryValue : styles.summaryValue}>{value}</Text>
     </View>
   );
 }
@@ -1851,6 +2066,7 @@ export default function App() {
   const [actionDraft, setActionDraft] = useState(null);
   const [reviewOrder, setReviewOrder] = useState(null);
   const [customerName, setCustomerName] = useState('Customer');
+  const [customerProfile, setCustomerProfile] = useState({ data: null, loading: false, error: '' });
   const [demoHoldings, setDemoHoldings] = useState(() => ({
     ...demoPortfolio,
     goldInvested: 0,
@@ -1893,7 +2109,49 @@ export default function App() {
     setBackendActivities({ items: [], loading: false, error: '' });
     setBackendPortfolio({ data: null, loading: false, error: '' });
     setBackendRefreshKey(null);
+    setCustomerProfile({ data: null, loading: false, error: '' });
   }, []);
+
+  const loadCustomerProfile = useCallback(async () => {
+    if (apiConfig.mode !== 'backend') return;
+    setCustomerProfile((current) => ({ ...current, loading: true, error: '' }));
+    try {
+      const result = await fetchProfile();
+      if (!result?.profile || typeof result.profile !== 'object') {
+        throw new Error('The service did not return registered account details.');
+      }
+      setCustomerProfile({ data: result.profile, loading: false, error: '' });
+    } catch (profileError) {
+      setCustomerProfile((current) => ({
+        ...current,
+        loading: false,
+        error: profileError.message || 'Could not load registered account details.',
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (screen !== 'profileDetail' || profileSection !== 'account' || apiConfig.mode !== 'backend') return undefined;
+    let active = true;
+    setCustomerProfile((current) => ({ ...current, loading: true, error: '' }));
+    fetchProfile()
+      .then((result) => {
+        if (!active) return;
+        if (!result?.profile || typeof result.profile !== 'object') {
+          throw new Error('The service did not return registered account details.');
+        }
+        setCustomerProfile({ data: result.profile, loading: false, error: '' });
+      })
+      .catch((profileError) => {
+        if (!active) return;
+        setCustomerProfile((current) => ({
+          ...current,
+          loading: false,
+          error: profileError.message || 'Could not load registered account details.',
+        }));
+      });
+    return () => { active = false; };
+  }, [profileSection, screen]);
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
@@ -1926,22 +2184,8 @@ export default function App() {
         try {
           const items = getResponseCollection(ratesResult.value, ['rates', 'items'], 'rates')
             .map(normalizeBackendRate)
-            .filter(Boolean)
-            .sort((left, right) => (
-              demoRates.findIndex((rate) => rate.id === left.id)
-              - demoRates.findIndex((rate) => rate.id === right.id)
-            ));
-          const completeMetalList = demoRates.map((configuredMetal) => (
-            items.find((rate) => rate.id === configuredMetal.id)
-            || {
-              id: configuredMetal.id,
-              metal: configuredMetal.metal,
-              purity: '',
-              ratePerGram: null,
-              source: 'Backend',
-            }
-          ));
-          setBackendRates({ items: completeMetalList, loading: false, error: '' });
+            .filter(Boolean);
+          setBackendRates({ items, loading: false, error: '' });
         } catch (loadError) {
           setBackendRates({ items: [], loading: false, error: loadError.message });
         }
@@ -2043,6 +2287,7 @@ export default function App() {
         return;
       }
       setCustomerName(result.profile?.name || 'Customer');
+      void loadCustomerProfile();
       setDevelopmentOtp('');
       setTab('home');
       startBackendRefresh();
@@ -2258,6 +2503,7 @@ export default function App() {
                 }}
                 onQuickBuyLayout={(event) => { quickBuyOffset.current = event.nativeEvent.layout.y; }}
                 quickBuyMetalId={quickBuyMetalId}
+                onQuickBuyMetalSelect={setQuickBuyMetalId}
                 quickBuyExpanded={quickBuyExpanded}
                 onQuickBuyToggle={() => setQuickBuyExpanded((expanded) => !expanded)}
                 rates={backendRatesItems}
@@ -2268,11 +2514,19 @@ export default function App() {
                 activitiesLoading={apiConfig.mode === 'backend' && backendActivities.loading}
                 activitiesError={apiConfig.mode === 'backend' ? backendActivities.error : ''}
                 onRetryActivities={retryBackendData}
-                onQuickBuy={({ metalId, mode, value }) => openAction('buy', {
-                  metal: metalId,
-                  mode,
-                  value,
-                })}
+                onQuickBuy={({ metalId, mode, value, stateCode, quoteToken, idempotencyKey: requestKey }) => {
+                  if (apiConfig.mode === 'demo') {
+                    openAction('buy', { metal: metalId, mode, value });
+                    return Promise.resolve(null);
+                  }
+                  return submitConfirmedPurchase(
+                    { metalId, mode, value, stateCode, quoteToken },
+                    requestKey,
+                  ).then((result) => {
+                    startBackendRefresh();
+                    return result;
+                  });
+                }}
               />
             ) : null}
             {tab === 'savings' ? (
@@ -2324,6 +2578,10 @@ export default function App() {
               section={profileSection}
               mobile={mobile}
               name={customerName}
+              profile={customerProfile.data}
+              profileLoading={customerProfile.loading}
+              profileError={customerProfile.error}
+              onRetryProfile={loadCustomerProfile}
               onLogout={confirmLogout}
               busy={busy}
               error={error}
@@ -2613,24 +2871,25 @@ const styles = StyleSheet.create({
   recentActivityStatus: { color: colors.primary, fontSize: 10, fontWeight: '700', marginTop: 3 },
   recentActivityAmount: { color: colors.text, fontSize: 11, fontWeight: '800', marginLeft: 7, maxWidth: 88 },
   noRecentActivity: { color: colors.muted, fontSize: 12, marginBottom: 18, paddingVertical: 16, textAlign: 'center' },
-  calculatorCard: { marginBottom: 18, padding: 16 },
+  calculatorCard: { marginBottom: 18, padding: 12 },
   calculatorCardExpanded: { borderColor: colors.primary },
-  calculatorHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 0, minHeight: 48 },
-  calculatorHeaderExpanded: { marginBottom: 15 },
+  calculatorHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 0, minHeight: 34 },
+  calculatorHeaderExpanded: { marginBottom: 10 },
   calculatorHeaderPressed: { opacity: 0.78 },
   calculatorHeadingCopy: { flex: 1, paddingRight: 8 },
   calculatorHeaderActions: { alignItems: 'center', flexDirection: 'row', gap: 5 },
-  calculatorTitle: { color: colors.text, fontSize: 17, fontWeight: '900' },
-  calculatorSubheading: { color: colors.muted, fontSize: 11, marginTop: 3 },
-  quickBuySelectedMetal: { color: colors.primary, fontSize: 14, fontWeight: '900', marginBottom: 8 },
+  calculatorTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  calculatorSubheading: { color: colors.muted, fontSize: 9, marginTop: 2 },
+  quickBuyStateField: { backgroundColor: colors.background, borderColor: colors.border, borderRadius: 12, borderWidth: 1, marginBottom: 14, paddingHorizontal: 12, paddingTop: 9 },
+  quickBuySelectedMetal: { color: colors.primary, fontSize: 11, fontWeight: '900', marginBottom: 7 },
   quickBuyModeRow: {
     backgroundColor: colors.background,
     borderRadius: 12,
     flexDirection: 'row',
-    marginBottom: 15,
+    marginBottom: 12,
     padding: 4,
   },
-  quickBuyModeOption: { alignItems: 'center', borderRadius: 9, flex: 1, justifyContent: 'center', minHeight: 40, paddingHorizontal: 5 },
+  quickBuyModeOption: { alignItems: 'center', borderRadius: 9, flex: 1, justifyContent: 'center', minHeight: 34, paddingHorizontal: 5 },
   quickBuyModeOptionSelected: { backgroundColor: colors.surface, elevation: 1 },
   quickBuyModeText: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   quickBuyModeTextSelected: { color: colors.primary, fontWeight: '900' },
@@ -2653,9 +2912,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderRadius: 12,
     marginBottom: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
   },
-  quickBuyTotal: { borderTopColor: colors.border, borderTopWidth: 1 },
+  quickBuySummaryRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', minHeight: 27, paddingVertical: 5 },
+  quickBuySummaryLabel: { color: colors.muted, flex: 1, fontSize: 9 },
+  quickBuySummaryValue: { color: colors.text, flexShrink: 1, fontSize: 9, fontWeight: '800', textAlign: 'right' },
+  quickBuyTotal: { borderTopColor: colors.border, borderTopWidth: 1, marginTop: 2 },
   quickRate: { alignItems: 'center', backgroundColor: colors.background, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 13, padding: 11 },
   priceBreakdown: { backgroundColor: colors.background, borderRadius: 12, marginBottom: 14, paddingHorizontal: 12, paddingVertical: 4 },
   priceBreakdownCompact: { marginTop: 5 },

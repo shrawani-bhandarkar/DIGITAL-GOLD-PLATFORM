@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Clock3, Plus, Search, X } from 'lucide-react';
 import DataTable from '../components/DataTable.jsx';
 import PageHeader from '../components/PageHeader.jsx';
@@ -7,14 +7,18 @@ import Modal from '../components/Modal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { useManagement } from '../context/ManagementContext.jsx';
+import { useAdmin } from '../context/AdminContext.jsx';
+import { apiRequest } from '../services/apiClient.js';
 import { formatCurrency } from '../utils/formatters.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 const PAGE_SIZE = 7;
+const METAL_TYPES = ['Gold', 'Silver', 'Platinum'];
 
 export default function RateManagementPage() {
   useDocumentTitle('Rate management');
   const { products, rateRequests, addRateRequest, reviewRateRequest } = useManagement();
+  const { activeRoleId } = useAdmin();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All statuses');
   const [metalFilter, setMetalFilter] = useState('All metals');
@@ -22,6 +26,33 @@ export default function RateManagementPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [formError, setFormError] = useState('');
   const [rejectRequest, setRejectRequest] = useState(null);
+  const [metalPrices, setMetalPrices] = useState([]);
+  const [metalPricesLoading, setMetalPricesLoading] = useState(true);
+  const [metalPricesError, setMetalPricesError] = useState('');
+  const [metalPriceFormError, setMetalPriceFormError] = useState('');
+  const [metalPriceSaved, setMetalPriceSaved] = useState(false);
+  const [savingMetalPrice, setSavingMetalPrice] = useState(false);
+  const isSuperAdmin = activeRoleId === 'SUPER_ADMIN';
+
+  const loadMetalPrices = useCallback(async () => {
+    setMetalPricesLoading(true);
+    try {
+      const result = await apiRequest('/api/admin/metal-prices');
+      if (!Array.isArray(result?.rates)) throw new Error('API returned invalid metal price data.');
+      setMetalPrices(result.rates);
+      setMetalPricesError('');
+      return true;
+    } catch (error) {
+      setMetalPricesError(error.message);
+      return false;
+    } finally {
+      setMetalPricesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMetalPrices();
+  }, [loadMetalPrices]);
 
   const filteredRequests = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -88,10 +119,53 @@ export default function RateManagementPage() {
       ? `${row.allowCoinDelivery ? 'Coin' : ''}${row.allowCoinDelivery && row.allowCashPayout ? ' / ' : ''}${row.allowCashPayout ? 'Cash' : ''} · ${formatCurrency((row.redemptionChargePaise ?? 0) / 100)} delivery`
       : 'Not configured' },
   ];
+  const currentMetalPriceColumns = [
+    { key: 'metalType', label: 'Metal' },
+    { key: 'purity', label: 'Purity' },
+    { key: 'ratePerGram', label: 'Rate / gram', align: 'right', render: (value) => formatCurrency(value) },
+    { key: 'effectiveDate', label: 'Effective date' },
+    { key: 'updatedAt', label: 'Updated at' },
+  ];
+
+  async function submitMetalPrice(event) {
+    event.preventDefault();
+    setMetalPriceFormError('');
+    setMetalPriceSaved(false);
+    const form = event.currentTarget;
+    const values = Object.fromEntries(new FormData(form).entries());
+    const ratePerGram = Number(values.ratePerGram);
+    if (!METAL_TYPES.includes(values.metalType) || !Number.isFinite(ratePerGram) || ratePerGram <= 0) {
+      setMetalPriceFormError('Choose a metal and enter a positive rate per gram.');
+      return;
+    }
+    setSavingMetalPrice(true);
+    try {
+      await apiRequest('/api/admin/metal-prices', {
+        method: 'POST',
+        body: {
+          metalType: values.metalType,
+          ratePerGram,
+          purity: values.purity,
+          effectiveDate: values.effectiveDate,
+        },
+      });
+      const refreshed = await loadMetalPrices();
+      if (!refreshed) {
+        setMetalPriceFormError('The price was saved, but the current rates could not be refreshed.');
+        return;
+      }
+      form.reset();
+      setMetalPriceSaved(true);
+    } catch (error) {
+      setMetalPriceFormError(error.message);
+    } finally {
+      setSavingMetalPrice(false);
+    }
+  }
 
   return (
     <>
-      <PageHeader eyebrow="PRICING OPERATIONS" title="Rate management" description="Review sample metal rates and control approval before publishing changes." actions={<button className="button button-primary" onClick={() => { setFormError(''); setFormOpen(true); }}><Plus size={15} /> Request rate change</button>} />
+      <PageHeader eyebrow="PRICING OPERATIONS" title="Rate management" description="Manage daily metal prices and review product rate change requests." actions={<button className="button button-primary" onClick={() => { setFormError(''); setFormOpen(true); }}><Plus size={15} /> Request rate change</button>} />
       <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>DATABASE</strong><span>Rate requests and product rates are stored in MySQL; no external market feed is connected.</span></div>
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><span className="stat-mini-dot" /></span><div><span>Active metal products</span><strong>{products.filter((product) => product.status === 'Active').length}</strong></div></article>
@@ -99,7 +173,29 @@ export default function RateManagementPage() {
         <article><span className="management-stat-icon stat-icon-blue"><Check size={17} /></span><div><span>Approved requests</span><strong>{rateRequests.filter((request) => request.status === 'Approved').length}</strong></div></article>
       </section>
       <section className="panel management-panel">
-        <div className="panel-heading rate-list-heading"><div><h2>Current sample rates and rules</h2><p>Active product values are per-item demo settings; configure approved values through the product catalog.</p></div></div>
+        <div className="panel-heading rate-list-heading">
+          <div><h2>Current metal prices</h2><p>Customer-facing prices are read from the latest MySQL rate effective today.</p></div>
+        </div>
+        {metalPricesLoading ? <p role="status">Loading current metal prices…</p> : (
+          <DataTable columns={currentMetalPriceColumns} rows={metalPrices} rowKey="id" />
+        )}
+        {metalPricesError && <p className="form-feedback" role="alert">{metalPricesError}</p>}
+        {isSuperAdmin ? (
+          <form className="management-form" onSubmit={submitMetalPrice}>
+            <div className="form-grid">
+              <label className="field-block"><span>Metal</span><select name="metalType" required defaultValue="Gold">{METAL_TYPES.map((metal) => <option key={metal}>{metal}</option>)}</select></label>
+              <label className="field-block"><span>Rate per gram (₹)</span><input name="ratePerGram" type="number" min="0.0001" step="0.0001" required placeholder="e.g. 7825" /></label>
+              <label className="field-block"><span>Purity</span><input name="purity" type="text" maxLength="32" required placeholder="e.g. 24K / 999.9%" /></label>
+              <label className="field-block"><span>Effective date</span><input name="effectiveDate" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} /></label>
+            </div>
+            {metalPriceFormError && <p className="form-feedback" role="alert">{metalPriceFormError}</p>}
+            {metalPriceSaved && <p className="form-feedback" role="status">Daily metal price saved and current rates refreshed.</p>}
+            <div className="form-actions"><button type="submit" className="button button-primary" disabled={savingMetalPrice}>{savingMetalPrice ? 'Saving…' : 'Save daily metal price'}</button></div>
+          </form>
+        ) : <p className="form-hint">Only the Super Admin can add or update daily prices and purity.</p>}
+      </section>
+      <section className="panel management-panel">
+        <div className="panel-heading rate-list-heading"><div><h2>Metal product rates and rules</h2><p>These product-specific buy and sell settings are separate from the daily customer-facing metal prices above.</p></div></div>
         <DataTable columns={currentRateColumns} rows={products.filter((product) => product.status === 'Active')} rowKey="id" />
       </section>
       <section className="panel management-panel">

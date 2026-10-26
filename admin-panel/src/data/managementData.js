@@ -7,9 +7,9 @@ export const initialProducts = [
 ];
 
 export const initialMetalMakingCharges = [
-  { metal: 'Gold', chargePerGramPaise: 25000, enabled: true, updatedAt: '17 Oct 2026' },
-  { metal: 'Silver', chargePerGramPaise: 1000, enabled: true, updatedAt: '17 Oct 2026' },
-  { metal: 'Platinum', chargePerGramPaise: 30000, enabled: true, updatedAt: '17 Oct 2026' },
+  { metal: 'Gold', chargePerPurchase: 250, enabled: true, updatedAt: '17 Oct 2026' },
+  { metal: 'Silver', chargePerPurchase: 10, enabled: true, updatedAt: '17 Oct 2026' },
+  { metal: 'Platinum', chargePerPurchase: 300, enabled: true, updatedAt: '17 Oct 2026' },
 ];
 
 export const initialRateRequests = [

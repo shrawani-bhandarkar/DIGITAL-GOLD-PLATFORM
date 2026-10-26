@@ -9,10 +9,20 @@ import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { useManagement } from '../context/ManagementContext.jsx';
 import { useAdmin } from '../context/AdminContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
-import { parseMoneyPaise, parseQuantityMilliGrams } from '../utils/financial.js';
+import { parseMoneyAmount, parseQuantityMilliGrams } from '../utils/financial.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 const PAGE_SIZE = 7;
+const INDIAN_STATES = [
+  ['AN', 'Andaman and Nicobar Islands'], ['AP', 'Andhra Pradesh'], ['AR', 'Arunachal Pradesh'], ['AS', 'Assam'],
+  ['BR', 'Bihar'], ['CH', 'Chandigarh'], ['CT', 'Chhattisgarh'], ['DN', 'Dadra and Nagar Haveli and Daman and Diu'],
+  ['DL', 'Delhi'], ['GA', 'Goa'], ['GJ', 'Gujarat'], ['HR', 'Haryana'], ['HP', 'Himachal Pradesh'],
+  ['DD', 'Daman and Diu (legacy UT code)'], ['JK', 'Jammu and Kashmir'], ['JH', 'Jharkhand'], ['KA', 'Karnataka'], ['KL', 'Kerala'], ['LA', 'Ladakh'],
+  ['LD', 'Lakshadweep'], ['MP', 'Madhya Pradesh'], ['MH', 'Maharashtra'], ['MN', 'Manipur'], ['ML', 'Meghalaya'],
+  ['MZ', 'Mizoram'], ['NL', 'Nagaland'], ['OR', 'Odisha'], ['PY', 'Puducherry'], ['PB', 'Punjab'],
+  ['RJ', 'Rajasthan'], ['SK', 'Sikkim'], ['TN', 'Tamil Nadu'], ['TG', 'Telangana'], ['TR', 'Tripura'],
+  ['UP', 'Uttar Pradesh'], ['UT', 'Uttarakhand'], ['WB', 'West Bengal'],
+];
 const EMPTY_PRODUCT = {
   name: '', metal: 'Gold', purity: '', unit: 'gram', buyRate: '', sellRate: '', minOrder: '', maxOrder: '', status: 'Active',
   buyChargeBps: 0, buyTaxBps: 0, sellChargeBps: 0, sellTaxBps: 0,
@@ -23,8 +33,8 @@ const EMPTY_PRODUCT = {
 
 export default function MetalProductsPage() {
   useDocumentTitle('Metal products');
-  const { products, saveProduct, toggleProduct, metalMakingCharges, updateMetalMakingCharge } = useManagement();
-  const { activeRoleId } = useAdmin();
+  const { products, saveProduct, toggleProduct, metalMakingCharges, updateMetalMakingCharge, metalTaxSettings, updateMetalTaxSettings } = useManagement();
+  const { activeRoleId, hasPermission } = useAdmin();
   const [query, setQuery] = useState('');
   const [metalFilter, setMetalFilter] = useState('All metals');
   const [statusFilter, setStatusFilter] = useState('All statuses');
@@ -37,6 +47,20 @@ export default function MetalProductsPage() {
   const [makingChargeValue, setMakingChargeValue] = useState('');
   const [makingChargeEnabled, setMakingChargeEnabled] = useState(false);
   const [makingChargeError, setMakingChargeError] = useState('');
+  const [taxSettingsDraft, setTaxSettingsDraft] = useState({ sellerStateCode: '', cgstPercent: '', sgstPercent: '', igstPercent: '' });
+  const [taxSettingsError, setTaxSettingsError] = useState('');
+  const [taxSettingsNotice, setTaxSettingsNotice] = useState('');
+  const canConfigureProducts = hasPermission('products');
+
+  useEffect(() => {
+    if (!metalTaxSettings) return;
+    setTaxSettingsDraft({
+      sellerStateCode: metalTaxSettings.sellerStateCode ?? '',
+      cgstPercent: String(Number(metalTaxSettings.cgstBps) / 100),
+      sgstPercent: String(Number(metalTaxSettings.sgstBps) / 100),
+      igstPercent: String(Number(metalTaxSettings.igstBps) / 100),
+    });
+  }, [metalTaxSettings]);
 
   const filteredProducts = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -137,26 +161,52 @@ export default function MetalProductsPage() {
 
   function openMakingChargeForm(config) {
     setMakingChargeForm(config);
-    setMakingChargeValue((config.chargePerGramPaise / 100).toFixed(2));
+    setMakingChargeValue(config.chargePerPurchase.toFixed(2));
     setMakingChargeEnabled(config.enabled);
     setMakingChargeError('');
   }
 
   async function saveMakingChargeForm(event) {
     event.preventDefault();
-    let chargePerGramPaise;
+    let chargePerPurchase;
     try {
-      chargePerGramPaise = parseMoneyPaise(makingChargeValue, 'Making charge per gram', true);
+      chargePerPurchase = parseMoneyAmount(makingChargeValue, 'Fixed making charge per purchase', true);
     } catch (error) {
       setMakingChargeError(error.message);
       return;
     }
-    const result = await updateMetalMakingCharge(makingChargeForm.metal, chargePerGramPaise, makingChargeEnabled);
+    const result = await updateMetalMakingCharge(makingChargeForm.metal, chargePerPurchase, makingChargeEnabled);
     if (!result.success) {
       setMakingChargeError(result.message);
       return;
     }
     setMakingChargeForm(null);
+  }
+
+  async function saveTaxSettings(event) {
+    event.preventDefault();
+    const rates = ['cgstPercent', 'sgstPercent', 'igstPercent'].map((key) => Number(taxSettingsDraft[key]) * 100);
+    if (
+      !taxSettingsDraft.sellerStateCode
+      || !rates.every((rate) => Number.isSafeInteger(rate) && rate >= 0 && rate <= 10_000)
+      || rates[0] !== rates[1]
+      || rates[2] !== rates[0] + rates[1]
+    ) {
+      setTaxSettingsError('Choose the seller state; CGST and SGST must match, and IGST must equal their combined rate.');
+      return;
+    }
+    const result = await updateMetalTaxSettings({
+      sellerStateCode: taxSettingsDraft.sellerStateCode,
+      cgstBps: rates[0],
+      sgstBps: rates[1],
+      igstBps: rates[2],
+    });
+    if (!result.success) {
+      setTaxSettingsError(result.message);
+      return;
+    }
+    setTaxSettingsError('');
+    setTaxSettingsNotice('GST settings saved. New Quick Buy quotes use these rates immediately.');
   }
 
   const makingChargeColumns = [
@@ -172,13 +222,13 @@ export default function MetalProductsPage() {
         </div>
       ),
     },
-    { key: 'chargePerGramPaise', label: 'Making charge / gram', align: 'right', render: (value) => formatCurrency(value / 100) },
+    { key: 'chargePerPurchase', label: 'Fixed making charge / purchase', align: 'right', render: formatCurrency },
     { key: 'enabled', label: 'Status', render: (value) => <StatusBadge status={value ? 'Enabled' : 'Disabled'} /> },
     { key: 'updatedAt', label: 'Last updated' },
     {
       key: 'actions',
       label: 'Actions',
-      render: (_, row) => activeRoleId === 'SUPER_ADMIN'
+      render: (_, row) => activeRoleId === 'SUPER_ADMIN' || canConfigureProducts
         ? <button className="table-action-link" onClick={() => openMakingChargeForm(row)} aria-label={`Edit ${row.metal} making charge`}><Pencil size={14} /> Edit</button>
         : <span>View only</span>,
     },
@@ -210,10 +260,30 @@ export default function MetalProductsPage() {
       </section>
       <section className="panel management-panel">
         <div className="panel-heading">
-          <div><h2>Metal-specific making charges</h2><p>Purchase charges are configured independently for each metal and applied to its selected weight.</p></div>
+          <div><h2>Metal-specific making charges</h2>          <p>Fixed making charges are configured independently for each metal and applied once per purchase.</p></div>
         </div>
         <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>STORED SETTINGS</strong><span>Making charges are saved as admin configuration; customer transactions are not triggered.</span></div>
         <DataTable columns={makingChargeColumns} rows={makingChargeRows} rowKey="metal" />
+      </section>
+      <section className="panel management-panel">
+        <div className="panel-heading">
+          <div><h2>Quick Buy GST</h2><p>GST is calculated server-side on metal value, making charges, and other configured purchase charges.</p></div>
+          {metalTaxSettings?.updatedAt ? <span>Updated {metalTaxSettings.updatedAt}</span> : null}
+        </div>
+        <form className="management-form" onSubmit={saveTaxSettings}>
+          <div className="form-grid">
+            <label className="field-block"><span>Seller state</span><select value={taxSettingsDraft.sellerStateCode} onChange={(event) => setTaxSettingsDraft({ ...taxSettingsDraft, sellerStateCode: event.target.value })} required disabled={!canConfigureProducts}>
+              <option value="">Choose seller state</option>{INDIAN_STATES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+            </select></label>
+            <label className="field-block"><span>CGST (%)</span><input type="number" min="0" max="100" step="0.01" value={taxSettingsDraft.cgstPercent} onChange={(event) => setTaxSettingsDraft({ ...taxSettingsDraft, cgstPercent: event.target.value })} required disabled={!canConfigureProducts} /></label>
+            <label className="field-block"><span>SGST (%)</span><input type="number" min="0" max="100" step="0.01" value={taxSettingsDraft.sgstPercent} onChange={(event) => setTaxSettingsDraft({ ...taxSettingsDraft, sgstPercent: event.target.value })} required disabled={!canConfigureProducts} /></label>
+            <label className="field-block"><span>IGST (%)</span><input type="number" min="0" max="100" step="0.01" value={taxSettingsDraft.igstPercent} onChange={(event) => setTaxSettingsDraft({ ...taxSettingsDraft, igstPercent: event.target.value })} required disabled={!canConfigureProducts} /></label>
+          </div>
+          <p className="muted-copy">Intra-state orders use CGST + SGST; interstate orders use IGST. Default entries follow the requested 1.5% + 1.5% split and 3% IGST. Confirm rates and tax treatment with your tax advisor before enabling sales.</p>
+          {taxSettingsError ? <p className="form-feedback" role="alert">{taxSettingsError}</p> : null}
+          {taxSettingsNotice ? <p className="form-feedback" role="status">{taxSettingsNotice}</p> : null}
+          {canConfigureProducts ? <div className="form-actions"><button type="submit" className="button button-primary">Save GST settings</button></div> : <p className="muted-copy">View only — the products permission is required to change GST settings.</p>}
+        </form>
       </section>
       <section className="panel management-panel">
         <div className="management-toolbar">
@@ -276,16 +346,16 @@ export default function MetalProductsPage() {
         open={Boolean(makingChargeForm)}
         onClose={() => setMakingChargeForm(null)}
         title={`Configure ${makingChargeForm?.metal ?? ''} making charge`}
-        description="This setting applies to purchases of the selected metal in this frontend demo."
+        description="This fixed amount is charged once per purchase of the selected metal."
       >
         <form className="management-form" onSubmit={saveMakingChargeForm}>
           <p className="form-help">
-            Current purchase rate is selected from the active product rate above. Making charges do not apply to sell orders.
+            This configured amount is charged once per purchase, regardless of weight. Making charges do not apply to sell orders.
           </p>
           <label className="field-block">
-            <span>Making charge per gram (₹)</span>
+            <span>Fixed making charge per purchase (₹)</span>
             <input
-              aria-label="Making charge per gram (₹)"
+              aria-label="Fixed making charge per purchase (₹)"
               type="number"
               min="0"
               step="0.01"

@@ -111,7 +111,9 @@ export function calculateBuyEstimate({ metalId, mode, value, ratePerGram }) {
   if (normalizedQuantity <= 0) {
     throw new Error('The estimate is too small to represent a positive metal quantity.');
   }
-  const metalValue = roundCurrency(normalizedQuantity * rate);
+  const metalValue = mode === 'amount' && metalId !== 'gold'
+    ? roundCurrency(enteredValue)
+    : roundCurrency(normalizedQuantity * rate);
 
   return {
     metalId,

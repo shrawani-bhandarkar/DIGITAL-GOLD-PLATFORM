@@ -8,6 +8,7 @@ import Modal from '../components/Modal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { useManagement } from '../context/ManagementContext.jsx';
 import { calculatePortfolio, calculateSellQuote, formatPaise, sumPaise } from '../utils/financial.js';
+import { validateCustomerInput } from '../utils/customerValidation.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 const PAGE_SIZE = 7;
@@ -60,22 +61,21 @@ export default function CustomerManagementPage() {
     const email = formData.get('email').trim().toLowerCase();
     const phone = formData.get('phone').trim();
     const pan = formData.get('pan').trim().toUpperCase();
-    if (customers.some((customer) => customer.email.toLowerCase() === email)) {
-      setFormError('A customer with this email address already exists.');
-      return;
-    }
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
-      setFormError('Enter a valid PAN, for example ABCDE1234F.');
-      return;
-    }
-    const saved = await addCustomer({
+    const customer = {
       name,
       email,
       phone,
       pan,
       city: formData.get('city').trim(),
-    });
-    if (!saved) { setFormError('Could not save the customer. Check the database connection and try again.'); return; }
+    };
+    const validationError = validateCustomerInput(customer, customers);
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
+    const result = await addCustomer(customer);
+    if (result?.error) { setFormError(result.error); return; }
+    if (!result?.customer) { setFormError('Could not save the customer. Check the database connection and try again.'); return; }
     setPage(1);
     setModalOpen(false);
     setFormError('');
@@ -124,8 +124,8 @@ export default function CustomerManagementPage() {
         <form className="management-form" onSubmit={createCustomer}>
           <div className="form-grid">
             <label className="field-block"><span>Full name</span><input name="name" required minLength="2" maxLength="80" autoComplete="name" placeholder="e.g. Priya Kapoor" /></label>
-            <label className="field-block"><span>Email address</span><input name="email" type="email" required maxLength="120" autoComplete="email" placeholder="name@example.com" /></label>
-            <label className="field-block"><span>Phone number</span><input name="phone" type="tel" required pattern="^\+?[0-9 ]{10,16}$" title="Enter a valid 10–16 digit phone number" autoComplete="tel" placeholder="+91 98765 43210" /></label>
+            <label className="field-block"><span>Email address</span><input name="email" type="email" required maxLength="120" pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$" title="Enter a valid email address" autoComplete="email" placeholder="name@example.com" /></label>
+            <label className="field-block"><span>Phone number</span><input name="phone" type="tel" required pattern="[0-9]{10}" maxLength="10" title="Enter exactly 10 digits" autoComplete="tel-national" inputMode="numeric" placeholder="9876543210" /></label>
             <label className="field-block"><span>City</span><input name="city" required maxLength="60" autoComplete="address-level2" placeholder="City" /></label>
             <label className="field-block form-grid-full"><span>PAN</span><input name="pan" required pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" maxLength="10" title="Enter a valid PAN, for example ABCDE1234F" placeholder="ABCDE1234F" /></label>
           </div>

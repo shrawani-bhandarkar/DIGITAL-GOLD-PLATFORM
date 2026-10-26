@@ -1,7 +1,7 @@
 import { apiRoutes } from '../config/apiRoutes';
 import { apiRequest } from './apiClient';
 
-export const fetchProfile = () => apiRequest(apiRoutes.profile);
+export const fetchProfile = () => apiRequest(apiRoutes.profile, { cache: 'no-store' });
 export const fetchRates = () => apiRequest(apiRoutes.rates);
 export const fetchPortfolio = () => apiRequest(apiRoutes.portfolio);
 export const fetchTransactions = (query) => apiRequest(apiRoutes.transactions, { query });
@@ -13,7 +13,7 @@ export const fetchTransaction = (transactionId) =>
 export const fetchNotifications = (query) => apiRequest(apiRoutes.notifications, { query });
 
 export const createPurchaseQuote = (input) =>
-  apiRequest(apiRoutes.purchaseQuote, { body: input });
+  apiRequest(apiRoutes.purchaseQuote, { body: input, cache: 'no-store' });
 export const submitConfirmedPurchase = (input, idempotencyKey) =>
   apiRequest(apiRoutes.purchaseSubmit, { body: input, idempotencyKey });
 export const createSellQuote = (input) =>

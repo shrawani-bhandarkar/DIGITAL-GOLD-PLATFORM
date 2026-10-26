@@ -20,7 +20,7 @@ export function setUnauthorizedHandler(handler) {
   unauthorizedHandler = typeof handler === 'function' ? handler : null;
 }
 
-export async function apiRequest(route, { body, query, idempotencyKey } = {}) {
+export async function apiRequest(route, { body, query, idempotencyKey, cache } = {}) {
   requireBackendMode();
   const queryString = query
     ? `?${Object.entries(query)
@@ -43,6 +43,7 @@ export async function apiRequest(route, { body, query, idempotencyKey } = {}) {
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
+      ...(cache ? { cache } : {}),
     });
   } catch (error) {
     if (error && error.name === 'AbortError') {

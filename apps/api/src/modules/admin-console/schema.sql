@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS admin_customer_profiles (
   pan VARCHAR(10) NULL,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id),
+  UNIQUE KEY uq_admin_customer_profiles_pan (pan),
   CONSTRAINT fk_admin_customer_profiles_user
     FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -22,6 +23,17 @@ CREATE TABLE IF NOT EXISTS admin_metal_products (
   KEY ix_admin_metal_products_metal_status (metal, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS admin_metal_price_history (
+  rate_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  metal_type ENUM('Gold', 'Silver', 'Platinum') NOT NULL,
+  rate_per_gram DECIMAL(20, 4) NOT NULL,
+  purity VARCHAR(32) NOT NULL,
+  effective_date DATE NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (rate_id),
+  KEY ix_admin_metal_price_history_latest (metal_type, effective_date, updated_at, rate_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS admin_rate_requests (
   request_id VARCHAR(64) NOT NULL,
   product_id VARCHAR(64) NOT NULL,
@@ -38,10 +50,22 @@ CREATE TABLE IF NOT EXISTS admin_rate_requests (
 
 CREATE TABLE IF NOT EXISTS admin_metal_making_charges (
   metal VARCHAR(32) NOT NULL,
-  charge_per_gram_paise BIGINT UNSIGNED NOT NULL,
+  charge_per_purchase DECIMAL(12,2) UNSIGNED NOT NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (metal)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS admin_metal_gst_settings (
+  settings_id TINYINT UNSIGNED NOT NULL,
+  seller_state_code CHAR(2) NOT NULL DEFAULT 'MH',
+  cgst_bps SMALLINT UNSIGNED NOT NULL,
+  sgst_bps SMALLINT UNSIGNED NOT NULL,
+  igst_bps SMALLINT UNSIGNED NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by_type VARCHAR(16) NULL,
+  updated_by_id INT NULL,
+  PRIMARY KEY (settings_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS admin_orders (
@@ -50,7 +74,7 @@ CREATE TABLE IF NOT EXISTS admin_orders (
   product_id VARCHAR(64) NOT NULL,
   order_type VARCHAR(16) NOT NULL,
   status VARCHAR(32) NOT NULL,
-  quantity DECIMAL(20, 3) NOT NULL,
+  quantity DECIMAL(20, 6) NOT NULL,
   amount DECIMAL(20, 2) NOT NULL,
   placed_at DATETIME NOT NULL,
   order_data JSON NOT NULL,
@@ -221,7 +245,7 @@ CREATE TABLE IF NOT EXISTS admin_metal_ledger (
   reference_type VARCHAR(24) NOT NULL,
   reference_id VARCHAR(64) NOT NULL,
   action VARCHAR(24) NOT NULL,
-  quantity DECIMAL(20, 3) NOT NULL,
+  quantity DECIMAL(20, 6) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (entry_id),
   UNIQUE KEY uq_admin_metal_ledger_event (reference_type, reference_id, action),

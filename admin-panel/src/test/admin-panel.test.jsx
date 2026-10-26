@@ -268,7 +268,7 @@ describe('management lists and forms', () => {
     const silverRow = within(chargePanel).getByRole('row', { name: /Silver/ });
     await user.click(within(silverRow).getByRole('button', { name: 'Edit Silver making charge' }));
     const editCharge = screen.getByRole('dialog');
-    const silverChargeInput = within(editCharge).getByLabelText('Making charge per gram (₹)');
+    const silverChargeInput = within(editCharge).getByLabelText('Fixed making charge per purchase (₹)');
     await user.clear(silverChargeInput);
     await user.type(silverChargeInput, '-1');
     expect(silverChargeInput).toBeInvalid();
@@ -293,9 +293,9 @@ describe('management lists and forms', () => {
     expect(buyQuote).toHaveTextContent('Metal rate / gram₹96');
     expect(buyQuote).toHaveTextContent('Weight10.000 g');
     expect(buyQuote).toHaveTextContent('Metal value₹960');
-    expect(buyQuote).toHaveTextContent('Making charge / gram₹20');
-    expect(buyQuote).toHaveTextContent('Total making charges₹200');
-    expect(buyQuote).toHaveTextContent('Purchase subtotal₹1,160');
+    expect(buyQuote).toHaveTextContent('Fixed making charge / purchase₹20');
+    expect(buyQuote).toHaveTextContent('Total making charges₹20');
+    expect(buyQuote).toHaveTextContent('Purchase subtotal₹980');
 
     await user.clear(quantityInput);
     await user.type(quantityInput, '5');
@@ -303,8 +303,8 @@ describe('management lists and forms', () => {
       expect(quantityInput).toHaveValue(5);
       const updatedQuote = within(buyDialog).getByRole('region', { name: 'Estimated order breakdown' });
       expect(updatedQuote).toHaveTextContent('Weight5.000 g');
-      expect(updatedQuote).toHaveTextContent('Total making charges₹100');
-      expect(updatedQuote).toHaveTextContent('Purchase subtotal₹580');
+      expect(updatedQuote).toHaveTextContent('Total making charges₹20');
+      expect(updatedQuote).toHaveTextContent('Purchase subtotal₹500');
     });
 
     await user.click(within(buyDialog).getByRole('button', { name: 'Cancel' }));
@@ -377,12 +377,12 @@ describe('operational workflows', () => {
     await user.type(within(orderDialog).getByLabelText('Purchase amount (₹)'), '5000');
     const quote = within(orderDialog).getByRole('region', { name: 'Estimated order breakdown' });
     expect(quote).toHaveTextContent('Estimated quantity1.603 g');
-    expect(quote).toHaveTextContent('Making charge / gram₹300');
-    expect(quote).toHaveTextContent('Total making charges₹480.9');
-    expect(quote).toHaveTextContent('Purchase subtotal₹5,480.9');
+    expect(quote).toHaveTextContent('Fixed making charge / purchase₹300');
+    expect(quote).toHaveTextContent('Total making charges₹300');
+    expect(quote).toHaveTextContent('Purchase subtotal₹5,300');
     expect(quote).toHaveTextContent('Other demo charges₹50');
     expect(quote).toHaveTextContent('Configured demo taxes₹9');
-    expect(quote).toHaveTextContent('Estimated final payable₹5,539.9');
+    expect(quote).toHaveTextContent('Estimated final payable₹5,359');
   });
 
   it('creates a simulated buy order and advances its status only after confirmation', async () => {
@@ -437,8 +437,8 @@ describe('operational workflows', () => {
     await user.selectOptions(within(form).getByLabelText('Purchase basis'), 'quantity');
     await user.type(within(form).getByLabelText('Quantity (grams)'), '1.250');
     expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Metal value₹9,781.25');
-    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Making charge / gram₹250');
-    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Total making charges₹312.5');
+    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Fixed making charge / purchase₹250');
+    expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Total making charges₹250');
     expect(within(form).getByRole('region', { name: 'Estimated order breakdown' })).toHaveTextContent('Other demo charges₹0');
     await user.selectOptions(within(form).getByLabelText('Payment method'), 'UPI');
     await user.click(within(form).getByRole('button', { name: 'Create demo order' }));
@@ -647,8 +647,8 @@ describe('administration demo behavior and reports', () => {
     const ownerChargePanel = screen.getByRole('heading', { name: 'Metal-specific making charges' }).closest('section');
     await user.click(within(ownerChargePanel).getByRole('button', { name: 'Edit Platinum making charge' }));
     const platinumChargeDialog = screen.getByRole('dialog');
-    await user.clear(within(platinumChargeDialog).getByLabelText('Making charge per gram (₹)'));
-    await user.type(within(platinumChargeDialog).getByLabelText('Making charge per gram (₹)'), '321');
+    await user.clear(within(platinumChargeDialog).getByLabelText('Fixed making charge per purchase (₹)'));
+    await user.type(within(platinumChargeDialog).getByLabelText('Fixed making charge per purchase (₹)'), '321');
     await user.click(within(platinumChargeDialog).getByRole('button', { name: 'Save making charge' }));
 
     await user.click(screen.getByRole('button', { name: 'Sign out' }));

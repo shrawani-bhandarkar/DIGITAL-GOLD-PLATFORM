@@ -50,7 +50,7 @@ function validateQuantityLimits(quantityMilliGrams: number, minimum: unknown, ma
 export function calculateOrderAmounts(
   order: Record<string, unknown>,
   product: Record<string, unknown>,
-  makingChargePerGramPaise = 0,
+  makingChargePerPurchase: unknown = "0",
   makingChargeEnabled = false,
 ): Record<string, unknown> {
   const type = order.type;
@@ -65,7 +65,8 @@ export function calculateOrderAmounts(
     const minOrder = parseMoneyPaise(product.minOrder, "Minimum order");
     const maxOrder = parseMoneyPaise(product.maxOrder, "Maximum order");
     if (baseAmountPaise < minOrder || baseAmountPaise > maxOrder) throw new Error("Purchase amount is outside this product's configured limits.");
-    const making = makingChargeEnabled ? multiplyDivideRounded(quantityMilliGrams, makingChargePerGramPaise, QUANTITY_SCALE) : 0;
+    const makingChargePaise = parseMoneyPaise(makingChargePerPurchase, "Fixed making charge per purchase");
+    const making = makingChargeEnabled ? makingChargePaise : 0;
     const purchaseSubtotal = baseAmountPaise + making;
     safeInteger(purchaseSubtotal, "Purchase subtotal");
     const charges = chargeFor(baseAmountPaise, product.buyChargeBps);
@@ -81,7 +82,7 @@ export function calculateOrderAmounts(
       taxes: amountInRupees(taxes),
       amount: amountInRupees(total),
       makingCharges: amountInRupees(making),
-      makingChargePerGram: makingChargePerGramPaise / 100,
+      makingChargePerPurchase: makingChargePaise / 100,
       makingChargeEnabled,
       purchaseSubtotal: amountInRupees(purchaseSubtotal),
     };
@@ -102,7 +103,7 @@ export function calculateOrderAmounts(
     taxes: amountInRupees(taxes),
     amount: amountInRupees(net),
     makingCharges: 0,
-    makingChargePerGram: 0,
+    makingChargePerPurchase: 0,
     makingChargeEnabled: false,
   };
 }

@@ -7,6 +7,7 @@ interface CustomerSessionRecord extends RowDataPacket {
   user_id: string | number;
   full_name: string;
   mobile: string;
+  email: string | null;
 }
 
 export interface AuthenticatedCustomerRequest extends Request {
@@ -14,6 +15,7 @@ export interface AuthenticatedCustomerRequest extends Request {
     id: string | number;
     name: string;
     mobileNumber: string;
+    email: string | null;
   };
   customerToken: string;
 }
@@ -38,7 +40,7 @@ export async function requireCustomer(
       return;
     }
     const [rows] = await database.execute<CustomerSessionRecord[]>(
-      `SELECT u.user_id, u.full_name, u.mobile
+      `SELECT u.user_id, u.full_name, u.mobile, u.email
        FROM customer_auth_sessions s
        INNER JOIN users u ON u.user_id = s.user_id
        WHERE s.token_hash = ?
@@ -57,6 +59,7 @@ export async function requireCustomer(
       id: session.user_id,
       name: session.full_name,
       mobileNumber: session.mobile,
+      email: session.email,
     };
     authenticatedRequest.customerToken = token;
     next();

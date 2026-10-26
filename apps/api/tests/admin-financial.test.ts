@@ -24,14 +24,24 @@ const product = {
   redemptionTaxBps: 1800,
 };
 
-test("server recalculates buy totals from product rates and making charge", () => {
-  const order = calculateOrderAmounts({ type: "Buy", quantity: 2, amount: 1, charges: 0 }, product, 100, true);
+test("server applies the same fixed making charge for different buy quantities", () => {
+  const order = calculateOrderAmounts({ type: "Buy", quantity: 2, amount: 1, charges: 0 }, product, "1.00", true);
+  const largerOrder = calculateOrderAmounts({ type: "Buy", quantity: 10, amount: 1, charges: 0 }, product, "1.00", true);
 
   assert.equal(order.baseAmount, 200);
-  assert.equal(order.makingCharges, 2);
+  assert.equal(order.makingCharges, 1);
   assert.equal(order.charges, 2);
   assert.equal(order.taxes, 0.36);
-  assert.equal(order.amount, 204.36);
+  assert.equal(order.amount, 203.36);
+  assert.equal(largerOrder.makingCharges, order.makingCharges);
+});
+
+test("server preserves a 400 rupee fixed making charge for every purchase size", () => {
+  for (const quantity of [1, 20]) {
+    const order = calculateOrderAmounts({ type: "Buy", quantity }, product, "400.00", true);
+    assert.equal(order.makingCharges, 400);
+    assert.equal(order.makingChargePerPurchase, 400);
+  }
 });
 
 test("server recalculates sell proceeds and rejects invalid balances at route layer", () => {

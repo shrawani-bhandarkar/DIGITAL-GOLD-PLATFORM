@@ -8,7 +8,7 @@ import StatCard from '../components/StatCard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { dashboardStats, metalRates } from '../data/dashboardData.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
-import { formatCurrency } from '../utils/formatters.js';
+import { formatCurrency, isValidCurrencyAmount } from '../utils/formatters.js';
 import { useManagement } from '../context/ManagementContext.jsx';
 import { useOperations } from '../context/OperationsContext.jsx';
 import { deriveDashboardMetrics, mockOrderDateKey } from '../utils/financial.js';
@@ -26,10 +26,27 @@ export default function DashboardPage() {
   const { dashboardSearch = '' } = useOutletContext() ?? {};
   const asOfDate = new Date().toISOString().slice(0, 10);
   const metrics = deriveDashboardMetrics({ customers, orders, payments, sips, redemptions }, asOfDate);
+  const incompleteMetalProducts = products.filter((item) => (
+    typeof item?.metal !== 'string' || !item.metal.trim()
+    || typeof item.purity !== 'string' || !item.purity.trim()
+  ));
+  const productsMissingRates = products.filter((item) => (
+    typeof item?.metal === 'string'
+    && item.metal.trim()
+    && item.status === 'Active'
+    && (!isValidCurrencyAmount(item.buyRate) || !isValidCurrencyAmount(item.sellRate))
+  ));
   const displayedRates = metalRates.map((metal) => {
-    const product = products.find((item) => item.metal.toLowerCase() === metal.key && item.status === 'Active'
-      && (metal.key !== 'gold' || item.purity.includes('999.9')));
-    return product ? { ...metal, purity: `${product.purity} purity`, buy: product.buyRate, sell: product.sellRate } : { ...metal, purity: 'No active product', buy: null, sell: null };
+    const product = products.find((item) => typeof item?.metal === 'string'
+      && item.metal.trim().toLowerCase() === metal.key
+      && item.status === 'Active'
+      && (metal.key !== 'gold' || (typeof item.purity === 'string' && item.purity.includes('999'))));
+    return product ? {
+      ...metal,
+      purity: `${product.purity} purity`,
+      buy: isValidCurrencyAmount(product.buyRate) ? product.buyRate : null,
+      sell: isValidCurrencyAmount(product.sellRate) ? product.sellRate : null,
+    } : { ...metal, purity: 'No active product', buy: null, sell: null };
   });
   const statPermissions = {
     'Registered customers': 'customers',
@@ -132,12 +149,22 @@ export default function DashboardPage() {
           <div><h2>Indicative metal rates</h2><p>Configured buy and sell rates per gram</p></div>
           <div className="rate-updated"><RefreshCw size={13} /> Updated 2 min ago</div>
         </div>
+        {incompleteMetalProducts.length > 0 && (
+          <p role="alert">
+            {incompleteMetalProducts.length} product {incompleteMetalProducts.length === 1 ? 'record is' : 'records are'} missing a metal type or purity. Check the product data; affected records are excluded from these rates.
+          </p>
+        )}
+        {productsMissingRates.length > 0 && (
+          <p role="alert">
+            {productsMissingRates.length} active product {productsMissingRates.length === 1 ? 'record has' : 'records have'} missing or invalid buy/sell rates. Check the saved product data; unavailable values are not displayed as prices.
+          </p>
+        )}
         <div className="rate-grid">
           {displayedRates.map((metal) => (
             <article className={`rate-card rate-${metal.key}`} key={metal.key}>
               <div className="rate-card-top"><span className={`metal-icon ${metal.key}`}><Gem size={19} /></span><span className="rate-label">{metal.name}</span><span className="rate-purity">{metal.purity}</span></div>
               <div className="rate-values"><div><span>BUY / g</span><strong>{metal.buy === null ? '—' : formatCurrency(metal.buy)}</strong></div><div><span>SELL / g</span><strong>{metal.sell === null ? '—' : formatCurrency(metal.sell)}</strong></div>{metal.change !== 'Sample rate' && <span className="rate-change"><ArrowUpRight size={14} /> {metal.change}</span>}</div>
-              <div className="rate-card-footer"><span><span className="live-dot" /> {metal.buy === null ? 'No active product' : 'Sample indicative rate'}</span><span>{metal.updated}</span></div>
+              <div className="rate-card-footer"><span><span className="live-dot" /> {metal.buy === null && metal.sell === null ? (metal.purity === 'No active product' ? 'No active product' : 'Rate unavailable') : 'Sample indicative rate'}</span><span>{metal.updated}</span></div>
             </article>
           ))}
         </div>

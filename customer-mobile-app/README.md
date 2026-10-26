@@ -1,8 +1,9 @@
 # DigiGold customer app
 
-This is the existing Expo/React Native customer app. It uses backend
-customer sign-in alongside clearly labelled frontend demo data for features
-that do not yet have backend APIs. Illustrative rates,
+This is the existing Expo/React Native customer app. It uses backend customer
+sign-in, database-backed metal rates, and the Quick Buy purchase-order API
+alongside clearly labelled frontend demo data for features that do not yet
+have backend APIs. Illustrative rates,
 in-memory holdings and transaction records, and empty notification state are
 not production data. No SMS, backend request, payment, or real purchase, sale,
 redemption, SIP, or gift is performed in demo mode.
@@ -15,7 +16,9 @@ From this directory:
 npm start
 ```
 
-Use the Expo QR code or press `a` for an Android emulator. Backend sign-in
+For an Android Studio emulator on Windows, run `npm run android:emulator`
+instead. It starts Metro with IPv4-first localhost resolution for ADB reverse
+forwarding, clears the Metro cache, and limits bundler workers. Backend sign-in
 requires an active customer record in the admin panel database. In API
 development mode, the backend-generated one-time code is shown on the
 verification screen. No fixed or local demo OTP is accepted by backend login.
@@ -53,22 +56,75 @@ The dashboard order is the existing DigiGold welcome header, Current Metal
 Rates, Quick Buy, Explore DigiGold actions, and Recent Activity. Gold 24K,
 Silver, and Platinum rate cards are tappable; tapping one opens Quick Buy,
 selects that metal, and scrolls the dashboard to the estimate. Quick Buy can
-also be expanded or collapsed and retains the existing amount or gram-based
-estimate and local purchase-review flow. The rates have a fixed horizontal
+also be expanded or collapsed and supports amount- or gram-based purchases.
+Demo mode retains its local purchase-review flow; backend mode requests a
+server quote and submits a confirmed order. The rates have a fixed horizontal
 viewport and can be swiped on narrow screens. Rates and sample holdings live
-in `src/services/demoData.js`; they are illustrative and are not live market
-data. Gross and net weights are shown only when corresponding weight fields
+in `src/services/demoData.js` only in demo mode; they are illustrative and are
+not live market data. Backend mode displays only the latest effective Gold,
+Silver, and Platinum prices and purity returned by the market-rates API from
+the MySQL metal-price history table, plus customer activity returned for the
+signed-in customer. It does not fill missing rates with demo labels; when no
+records exist, the dashboard shows an empty state. Gross and net weights are shown
+only when corresponding weight fields
 are present in the portfolio data (for example, `goldGrossWeightGrams` or
 `grossWeightGrams.gold`); otherwise the UI says they are unavailable. The
 local demo `*Grams` holding is not presented as gross or purity-adjusted net
 weight. No percentage price movement is shown because no verified previous-rate
 feed is configured.
 
-The dashboard **Quick Buy** calculator and dedicated Buy form share the
-buy-only `calculateBuyEstimate` calculation in
-`src/services/pricingService.js`. Buy estimates use rate × quantity only and
-do not show or apply making charges or tax. SIP/Gift demo quantity estimates
-also use the rate-only calculation.
+In demo mode, the dashboard **Quick Buy** calculator and dedicated Buy form
+share the buy-only `calculateBuyEstimate` calculation in
+`src/services/pricingService.js`. Demo Buy estimates use rate × quantity only.
+Backend Quick Buy instead uses a server quote sourced from the latest effective
+MySQL metal price, purity, active product, and making-charge configuration.
+Configured product buy charges are included in the GST taxable base. The
+customer supplies a billing-state code; the server compares it with the
+configured seller state and applies CGST + SGST for intra-state orders or IGST
+for interstate orders. GST rates and the jurisdiction are configured in the
+Admin Panel. The quote shows each tax component, and the customer confirms it
+before the server recalculates and creates an order. The supplied state is
+stored with the order but is not address-verified by the current profile or
+payment flow; production payments must verify the billing address before tax
+finalization.
+
+### Backend Quick Buy API and payment status
+
+Both endpoints require the existing authenticated customer bearer token:
+
+- `POST /api/customer/orders/purchase/quote` accepts `{ "metalId": "gold",
+  "mode": "amount", "value": "1000", "stateCode": "MH" }` (or `mode: "grams"`).
+  The state code is the customer's declared billing state. The response returns
+  the current rate, purity, effective date, quantity, itemized charges, GST
+  jurisdiction and tax breakdown, and total.
+- `POST /api/customer/orders/purchase` accepts the same input, the
+  `quoteToken` returned by the quote endpoint, and an `Idempotency-Key`
+  header. The signed quote token expires after two minutes and is invalidated
+  when its rate, active product, making-charge, or GST configuration changes. The
+  endpoint re-reads the database and inserts the order and payment intent in
+  one MySQL transaction.
+  Retrying the same key and input returns the original order; reusing a key
+  with different input is rejected.
+- Admin Panel configuration uses `PUT /api/admin/console/making-charges/:metal`
+  and `PUT /api/admin/console/metal-tax-settings`. Both require Superadmin or
+  an Admin with the `products` permission.
+
+Orders reuse `admin_orders`, `admin_payments`, `admin_metal_products`,
+`admin_metal_price_history`, and `admin_metal_making_charges`. GST settings use
+the dedicated `admin_metal_gst_settings` table. Apply
+`apps/api/src/modules/admin-console/migrations/001-create-metal-gst-settings.sql`
+to an existing database; it is additive and preserves existing charge data.
+It initializes the requested 1.5% CGST, 1.5% SGST, and 3% IGST rates while
+leaving seller state unconfigured until an authorized Admin sets it. No live
+quote is enabled until the seller state is configured. An Admin can update
+making charges and GST only when the Superadmin has granted the `products`
+permission; Superadmin retains access. Rates displayed by Quick Buy come from
+the database quote and persisted GST settings, not client-side defaults.
+Saved Quick Buy orders are returned by the existing customer activity API and
+Admin Console order state. No payment gateway is configured, so payment stays
+**Pending**, no funds are collected, and Admins cannot mark these orders
+completed as if a payment had succeeded. Processing or cancellation status
+changes remain available in the Admin order screen.
 
 Sell has a separate `calculateSellEstimate` rule. The requested demo config
 adds a fixed ₹250 Gold transaction charge and 3% demo GST; CGST/SGST are
@@ -109,14 +165,17 @@ orders can be enabled.
 
 ## Data modes
 
-- Default: `EXPO_PUBLIC_DATA_MODE=backend`. Dashboard rates and starting portfolio
-  values are explicitly illustrative and are loaded from
-  `src/services/demoData.js`. New sample transactions and portfolio updates
-  live only in React state and start empty on each app session.
+- Default: `EXPO_PUBLIC_DATA_MODE=backend`. Rates and recent activity are loaded
+  from the API. If the database has no active metal rates or the signed-in
+  customer has no activity, the dashboard shows an empty state rather than
+  sample records.
+- Demo: set `EXPO_PUBLIC_DATA_MODE=demo`. Illustrative rates, starting portfolio
+  values, and sample transactions come from `src/services/demoData.js` or
+  in-memory app state and are never presented as backend records.
 - Backend: set `EXPO_PUBLIC_API_BASE_URL` to the API origin, then restart Expo.
   Backend mode does not fall back to demo sign-in or use local storage. The API
-  customer OTP routes are implemented; the other data routes are not all
-  available yet and remain separate from sign-in.
+  customer OTP, market-rate, and customer-activity routes are implemented;
+  other data routes are not all available yet and remain separate from sign-in.
 
 For local development, set `NODE_ENV=development` for the API and apply
 `apps/api/src/modules/customer-auth/schema.sql` to `digital_gold_db`. The
@@ -146,7 +205,7 @@ agree on:
    requirements, and the profile response fields. The current adapter expects
    an `accessToken` from OTP verification only as a proposed contract.
 4. Exact paths, methods, request and response schemas for profile, rates,
-   portfolio, transaction history, purchase/sell quote and submission,
+   portfolio, transaction history, sell quote and submission,
    redemption quote and submission, SIP list/create/cancel, gift quote/send,
    and notifications.
 5. Server-side validation rules for customer permissions, holdings, metal
@@ -167,12 +226,11 @@ agree on:
     messages, correlation IDs, and expired-session behavior.
 9. Pagination and filtering/sorting rules for activity, SIPs, and
     notifications; notification read/unread semantics if available.
-10. Quote rules and endpoint sequencing: quote binding/expiry, whether server
-    review reserves anything, and the precise payment-provider handoff and
-    callback/return verification flow. The app must not treat a client
-    calculation or payment redirect as transaction success.
-11. Idempotency-key header/body contract, key lifetime, duplicate response
-    behavior, and safe recovery for timeouts/unknown outcomes.
+10. A future payment-provider handoff and callback/return verification flow.
+    Quick Buy currently makes no reservation and recalculates its quote on
+    submission. The app does not treat a client calculation as payment success.
+11. Quick Buy uses the `Idempotency-Key` header; a retry must reuse the same
+    key and input to recover an unknown network outcome.
 12. How admin APIs retrieve the exact same transaction by its authoritative
     transaction ID, permitted admin roles, and consistency/visibility timing.
     The mobile app must never use admin credentials or write to admin APIs.
@@ -190,6 +248,8 @@ do not move metal or money. Records and balances reset when the app restarts
 or the demo user logs out. No action contacts a backend, payment provider, or
 gift recipient, and demo activity is not visible to the admin panel.
 
-Real financial actions stay unavailable until the backend contract, quote
-flow, payment integration, authorization, and server-confirmed transaction
-refresh are implemented.
+Backend Quick Buy is available with server-confirmed database order
+persistence, but it does not charge customers. Sell, redemption, SIP, gift,
+and other real financial actions remain unavailable until their backend
+contracts, payment integration, authorization, and server-confirmed
+transaction flows are implemented.

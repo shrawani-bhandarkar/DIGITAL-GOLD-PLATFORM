@@ -5,9 +5,21 @@ import { randomUUID } from "node:crypto";
 import database from "../../config/database";
 import { requireAdmin, type AuthenticatedRequest } from "../auth/middleware";
 import { calculateOrderAmounts, calculateRedemptionAmounts } from "./financial";
+import { mapMetalProduct } from "./product-data";
+import { validateNewCustomer } from "./customer-validation";
 
 const router = Router();
 router.use(requireAdmin);
+
+function makingChargeAmount(value: unknown): { amount: string; paise: bigint } {
+  if (typeof value !== "string" || !/^\d+(?:\.\d{1,2})?$/.test(value)) {
+    throw new Error("Fixed making charge per purchase must be a valid amount with up to two decimal places.");
+  }
+  const [whole, fraction = ""] = value.split(".");
+  const paise = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+  if (paise > 999_999_999_999n) throw new Error("Fixed making charge per purchase is too large.");
+  return { amount: `${whole}.${fraction.padEnd(2, "0")}`, paise };
+}
 
 const ADMIN_DEFAULT_PERMISSIONS: Record<string, boolean> = {
   dashboard: true,
@@ -23,6 +35,12 @@ const ADMIN_DEFAULT_PERMISSIONS: Record<string, boolean> = {
 
 const REPORT_TYPES = ["Payments", "Refunds", "Settlements", "Orders"] as const;
 type ReportType = (typeof REPORT_TYPES)[number];
+const METAL_TYPES = ["Gold", "Silver", "Platinum"] as const;
+const INDIAN_STATE_CODES = [
+  "AN", "AP", "AR", "AS", "BR", "CH", "CT", "DN", "DD", "DL", "GA", "GJ", "HR", "HP",
+  "JK", "JH", "KA", "KL", "LA", "LD", "MP", "MH", "MN", "ML", "MZ", "NL", "OR", "PY",
+  "PB", "RJ", "SK", "TN", "TG", "TR", "UP", "UT", "WB",
+] as const;
 
 const REPORT_QUERIES: Record<ReportType, string> = {
   Payments: `
@@ -100,6 +118,14 @@ function requirePermission(permission: string) {
 
 interface JsonRow extends RowDataPacket {
   record_data: unknown;
+}
+
+interface MetalProductJsonRow extends JsonRow {
+  product_id: string;
+  name: string;
+  metal: string;
+  purity: string;
+  status: string;
 }
 
 function parseJson<T>(value: unknown): T {
@@ -200,13 +226,13 @@ function requestError(response: Response, error: unknown): void {
   const message = error instanceof Error ? error.message : "Could not save admin data.";
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
   if (code) {
-    console.error("Admin console database write failed:", error);
+    if (code !== "ER_DUP_ENTRY") console.error("Admin console database write failed:", error);
     response.status(code === "ER_DUP_ENTRY" ? 409 : 500).json({
-      message: code === "ER_DUP_ENTRY" ? "A record with this identifier already exists." : "Could not save admin data. Check the database connection and try again.",
+      message: code === "ER_DUP_ENTRY" ? "A customer with one or more of these details already exists." : "Could not save admin data. Check the database connection and try again.",
     });
     return;
   }
-  response.status(message.includes("Duplicate entry") ? 409 : 400).json({ message });
+  response.status(message.includes("already exists") || message.includes("Duplicate entry") ? 409 : 400).json({ message });
 }
 
 function timelineUpdate(data: Record<string, unknown>, status: string, label: string): Record<string, unknown> {
@@ -224,9 +250,18 @@ router.get("/state", async (request, response) => {
   try {
     const actor = (request as unknown as AuthenticatedRequest).admin;
     const permissions = await readPermissions(actor.roleId);
-    const [products] = await database.execute<JsonRow[]>("SELECT product_data AS record_data FROM admin_metal_products ORDER BY created_at DESC");
+    const [products] = await database.execute<MetalProductJsonRow[]>(
+      `SELECT product_id, name, metal, purity, status, product_data AS record_data
+       FROM admin_metal_products ORDER BY created_at DESC`,
+    );
     const [rateRequests] = await database.execute<JsonRow[]>("SELECT request_data AS record_data FROM admin_rate_requests ORDER BY requested_at DESC");
-    const [makingCharges] = await database.execute<RowDataPacket[]>("SELECT metal, charge_per_gram_paise, enabled, updated_at FROM admin_metal_making_charges ORDER BY metal");
+    const [makingCharges] = await database.execute<RowDataPacket[]>(
+      `SELECT metal, charge_per_purchase, enabled, updated_at
+       FROM admin_metal_making_charges ORDER BY metal`,
+    );
+    const [metalTaxSettings] = await database.execute<RowDataPacket[]>(
+      "SELECT seller_state_code, cgst_bps, sgst_bps, igst_bps, updated_at FROM admin_metal_gst_settings WHERE settings_id = 1 LIMIT 1",
+    );
     const [orders] = await database.execute<JsonRow[]>("SELECT order_data AS record_data FROM admin_orders ORDER BY placed_at DESC");
     const [sips] = await database.execute<JsonRow[]>("SELECT sip_data AS record_data FROM admin_sip_plans ORDER BY created_at DESC");
     const [redemptions] = await database.execute<JsonRow[]>("SELECT redemption_data AS record_data FROM admin_redemptions ORDER BY requested_at DESC");
@@ -250,14 +285,23 @@ router.get("/state", async (request, response) => {
     );
 
     response.json({
-      products: (permissions.products ? products : []).map((row) => parseJson(row.record_data)),
+      products: (permissions.products ? products : []).map(mapMetalProduct),
       rateRequests: (permissions.products ? rateRequests : []).map((row) => parseJson(row.record_data)),
       metalMakingCharges: (permissions.products ? makingCharges : []).map((row) => ({
         metal: row.metal,
-        chargePerGramPaise: Number(row.charge_per_gram_paise),
+        chargePerPurchase: Number(row.charge_per_purchase),
         enabled: Boolean(row.enabled),
         updatedAt: row.updated_at,
       })),
+      metalTaxSettings: permissions.products && metalTaxSettings[0]
+        ? {
+          sellerStateCode: metalTaxSettings[0].seller_state_code,
+          cgstBps: Number(metalTaxSettings[0].cgst_bps),
+          sgstBps: Number(metalTaxSettings[0].sgst_bps),
+          igstBps: Number(metalTaxSettings[0].igst_bps),
+          updatedAt: metalTaxSettings[0].updated_at,
+        }
+        : null,
       orders: (permissions.orders || permissions.reports ? orders : []).map((row) => parseJson(row.record_data)),
       sips: (permissions.orders ? sips : []).map((row) => parseJson(row.record_data)),
       redemptions: (permissions.fulfillment ? redemptions : []).map((row) => parseJson(row.record_data)),
@@ -386,21 +430,33 @@ router.post("/reports", requirePermission("reports"), async (request, response) 
 });
 
 router.post("/customers", requirePermission("customers"), async (request, response) => {
-  const customer = request.body as Record<string, unknown>;
+  const customer = request.body && typeof request.body === "object" && !Array.isArray(request.body)
+    ? request.body as Record<string, unknown>
+    : {};
   let connection: PoolConnection | undefined;
   try {
     connection = await database.getConnection();
-    const name = requiredString(customer.name, "Name");
-    const email = requiredString(customer.email, "Email").toLowerCase();
-    const phone = requiredString(customer.phone, "Phone").replace(/\s+/g, "");
-    if (!/^\+?[0-9]{10,15}$/.test(phone)) {
-      throw new Error("Enter a phone number with 10 to 15 digits.");
-    }
-    const city = requiredString(customer.city, "City");
-    const pan = requiredString(customer.pan, "PAN").toUpperCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) throw new Error("Enter a valid PAN.");
+    const { name, email, phone, city, pan } = validateNewCustomer(customer);
     await connection.beginTransaction();
+    const [duplicates] = await connection.execute<RowDataPacket[]>(
+      `SELECT u.email, u.mobile, p.pan
+       FROM users u
+       LEFT JOIN admin_customer_profiles p ON p.user_id = u.user_id
+       WHERE LOWER(u.email) = ?
+          OR RIGHT(REGEXP_REPLACE(u.mobile, '[^0-9]', ''), 10) = ?
+          OR UPPER(p.pan) = ?
+       LIMIT 1`,
+      [email, phone, pan],
+    );
+    if (duplicates[0]) {
+      if (String(duplicates[0].email ?? "").toLowerCase() === email) {
+        throw new Error("A customer with this email address already exists.");
+      }
+      if (String(duplicates[0].mobile ?? "").replace(/\D/g, "").slice(-10) === phone) {
+        throw new Error("A customer with this phone number already exists.");
+      }
+      throw new Error("A customer with this PAN already exists.");
+    }
     const [result] = await connection.execute<ResultSetHeader>(
       `INSERT INTO users (full_name, mobile, email, status, verification_status)
        VALUES (?, ?, ?, 'ACTIVE', 'PENDING')`,
@@ -492,18 +548,80 @@ router.put("/products/:productId", requirePermission("products"), async (request
   } catch (error) { requestError(response, error); }
 });
 
-router.put("/making-charges/:metal", async (request, response) => {
-  const actor = (request as unknown as AuthenticatedRequest).admin;
-  if (actor.roleId !== "SUPER_ADMIN") { response.status(403).json({ message: "Only Super Admin can update making charges." }); return; }
+router.put("/making-charges/:metal", requirePermission("products"), async (request, response) => {
   try {
-    const { chargePerGramPaise, enabled } = request.body as { chargePerGramPaise: number; enabled: boolean };
-    if (!Number.isSafeInteger(chargePerGramPaise) || chargePerGramPaise < 0 || typeof enabled !== "boolean") throw new Error("Invalid making-charge settings.");
+    const metal = request.params.metal;
+    if (!METAL_TYPES.includes(metal as (typeof METAL_TYPES)[number])) throw new Error("Choose a supported metal.");
+    if (!request.body || typeof request.body !== "object" || Array.isArray(request.body)) {
+      throw new Error("Provide making-charge settings.");
+    }
+    const { chargePerPurchase, enabled } = request.body as Record<string, unknown>;
+    if (typeof enabled !== "boolean") {
+      throw new Error("Fixed making charge per purchase must be a non-negative amount and have an explicit enabled status.");
+    }
+    const parsedCharge = makingChargeAmount(chargePerPurchase);
     await database.execute(
-      `INSERT INTO admin_metal_making_charges (metal, charge_per_gram_paise, enabled) VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE charge_per_gram_paise = VALUES(charge_per_gram_paise), enabled = VALUES(enabled)`,
-      [request.params.metal, chargePerGramPaise, enabled],
+      `INSERT INTO admin_metal_making_charges (metal, charge_per_purchase, enabled) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE charge_per_purchase = VALUES(charge_per_purchase), enabled = VALUES(enabled)`,
+      [metal, parsedCharge.amount, enabled],
     );
-    response.json({ success: true });
+    const [rows] = await database.execute<RowDataPacket[]>(
+      `SELECT metal, charge_per_purchase, enabled, updated_at
+       FROM admin_metal_making_charges
+       WHERE metal = ?
+       LIMIT 1`,
+      [metal],
+    );
+    const saved = rows[0];
+    if (
+      !saved
+      || makingChargeAmount(String(saved.charge_per_purchase)).paise !== parsedCharge.paise
+      || Boolean(saved.enabled) !== enabled
+    ) {
+      throw new Error(`Could not verify the saved ${metal} making charge in the database.`);
+    }
+    response.json({
+      success: true,
+      makingCharge: {
+        metal: saved.metal,
+        chargePerPurchase: Number(saved.charge_per_purchase),
+        enabled: Boolean(saved.enabled),
+        updatedAt: saved.updated_at,
+      },
+    });
+  } catch (error) { requestError(response, error); }
+});
+
+router.put("/metal-tax-settings", requirePermission("products"), async (request, response) => {
+  const actor = (request as unknown as AuthenticatedRequest).admin;
+  try {
+    const settings = request.body as Record<string, unknown>;
+    const { sellerStateCode, cgstBps, sgstBps, igstBps } = settings;
+    if (typeof sellerStateCode !== "string" || !INDIAN_STATE_CODES.includes(sellerStateCode as (typeof INDIAN_STATE_CODES)[number])) {
+      throw new Error("Choose a valid seller state.");
+    }
+    const isValidRate = (rate: unknown): rate is number => (
+      typeof rate === "number" && Number.isSafeInteger(rate) && rate >= 0 && rate <= 10_000
+    );
+    if (
+      !isValidRate(cgstBps)
+      || !isValidRate(sgstBps)
+      || !isValidRate(igstBps)
+      || cgstBps !== sgstBps
+      || cgstBps + sgstBps !== igstBps
+    ) {
+      throw new Error("CGST and SGST must be equal, and IGST must equal their combined rate; rates must be whole basis points from 0 to 10,000.");
+    }
+    await database.execute(
+      `INSERT INTO admin_metal_gst_settings
+         (settings_id, seller_state_code, cgst_bps, sgst_bps, igst_bps, updated_by_type, updated_by_id)
+       VALUES (1, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE seller_state_code = VALUES(seller_state_code), cgst_bps = VALUES(cgst_bps),
+         sgst_bps = VALUES(sgst_bps), igst_bps = VALUES(igst_bps),
+         updated_by_type = VALUES(updated_by_type), updated_by_id = VALUES(updated_by_id)`,
+      [sellerStateCode, cgstBps, sgstBps, igstBps, actor.roleId === "SUPER_ADMIN" ? "superadmin" : "admin", actor.id],
+    );
+    response.json({ sellerStateCode, cgstBps, sgstBps, igstBps, success: true });
   } catch (error) { requestError(response, error); }
 });
 
@@ -565,8 +683,8 @@ router.post("/orders", requirePermission("orders"), async (request, response) =>
     const [productRows] = await connection.execute<JsonRow[]>("SELECT status, product_data AS record_data FROM admin_metal_products WHERE product_id = ? LIMIT 1", [productId]);
     if (!productRows[0] || productRows[0].status !== "Active") throw new Error("Choose an active metal product.");
     const product = parseJson<Record<string, unknown>>(productRows[0].record_data);
-    const [makingChargeRows] = await connection.execute<RowDataPacket[]>("SELECT charge_per_gram_paise, enabled FROM admin_metal_making_charges WHERE metal = ? LIMIT 1", [String(product.metal)]);
-    const pricedOrder = calculateOrderAmounts({ ...data, type }, product, Number(makingChargeRows[0]?.charge_per_gram_paise ?? 0), Boolean(makingChargeRows[0]?.enabled));
+    const [makingChargeRows] = await connection.execute<RowDataPacket[]>("SELECT charge_per_purchase, enabled FROM admin_metal_making_charges WHERE metal = ? LIMIT 1", [String(product.metal)]);
+    const pricedOrder = calculateOrderAmounts({ ...data, type }, product, String(makingChargeRows[0]?.charge_per_purchase ?? "0"), Boolean(makingChargeRows[0]?.enabled));
     const quantity = Number(pricedOrder.quantity);
     const amount = Number(pricedOrder.amount);
     if (type === "Sell") await connection.execute("SELECT user_id FROM users WHERE user_id = ? FOR UPDATE", [userId]);
@@ -809,7 +927,13 @@ async function updateTimelineRecord(
       response.status(409).json({ message: `Cannot change ${label.toLowerCase()} from ${currentStatus} to ${status}.` });
       return;
     }
-    const updated = timelineUpdate(parseJson<Record<string, unknown>>(rows[0].record_data), status, `${label} ${status.toLowerCase()}`);
+    const currentRecord = parseJson<Record<string, unknown>>(rows[0].record_data);
+    if (table === "admin_orders" && status === "Completed" && currentRecord.paymentMode === "no-gateway") {
+      await connection.rollback();
+      response.status(409).json({ message: "This order cannot be completed until a real payment has been confirmed by a configured payment gateway." });
+      return;
+    }
+    const updated = timelineUpdate(currentRecord, status, `${label} ${status.toLowerCase()}`);
     if (table === "admin_redemptions" && status === "Shipped" && updated.tracking === "—") {
       updated.tracking = `AWB-${randomUUID().slice(0, 8).toUpperCase()}`;
     }
@@ -841,12 +965,18 @@ async function updateTimelineRecord(
     }
     let payment: Record<string, unknown> | null = null;
     if (table === "admin_orders" && ["Completed", "Failed", "Cancelled"].includes(status)) {
-      const paymentStatus = status === "Completed" ? "Successful" : "Failed";
       const [paymentRows] = await connection.execute<JsonRow[]>("SELECT payment_id, payment_data AS record_data FROM admin_payments WHERE order_id = ? ORDER BY created_at DESC LIMIT 1", [id]);
       if (paymentRows[0]) {
         payment = parseJson<Record<string, unknown>>(paymentRows[0].record_data);
+        const paymentStatus = payment.paymentMode === "no-gateway"
+          ? status === "Cancelled" ? "Cancelled" : "Failed"
+          : status === "Completed" ? "Successful" : "Failed";
         payment.status = paymentStatus;
         await connection.execute("UPDATE admin_payments SET status = ?, payment_data = ? WHERE payment_id = ?", [paymentStatus, JSON.stringify(payment), paymentRows[0].payment_id]);
+        if (table === "admin_orders") {
+          updated.paymentStatus = paymentStatus;
+          await connection.execute("UPDATE admin_orders SET order_data = ? WHERE order_id = ?", [JSON.stringify(updated), id]);
+        }
       }
     }
     await connection.commit();
