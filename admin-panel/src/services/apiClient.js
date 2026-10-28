@@ -1,5 +1,13 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/+$/, '') ?? '';
 
+function apiRequestUrl(path) {
+  if (
+    API_BASE_URL.startsWith('/')
+    && (path === API_BASE_URL || path.startsWith(`${API_BASE_URL}/`))
+  ) return path;
+  return `${API_BASE_URL}${path}`;
+}
+
 export async function apiRequest(path, options = {}) {
   if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || path.includes('\\') || /[\u0000-\u001f]/.test(path)) {
     throw new Error('API paths must be same-origin paths beginning with one slash.');
@@ -15,7 +23,7 @@ export async function apiRequest(path, options = {}) {
   const headers = new Headers(suppliedHeaders);
   if (!headers.has('Accept')) headers.set('Accept', 'application/json');
   if (hasBody && !isBinaryBody && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(apiRequestUrl(path), {
     ...requestOptions,
     credentials: requestOptions.credentials ?? 'include',
     body: requestBody,

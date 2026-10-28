@@ -10,16 +10,29 @@ describe('apiRequest preparation', () => {
 
   it('uses same-origin API paths when no base URL is configured', async () => {
     vi.stubEnv('VITE_API_BASE_URL', '');
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}', {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response('{"ok":true}', {
       status: 200,
       headers: { 'content-type': 'application/json' },
-    }));
+    })));
     vi.stubGlobal('fetch', fetchMock);
     const { apiRequest } = await import('../services/apiClient.js');
     await expect(apiRequest('/api/auth/session')).resolves.toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith('/api/auth/session', expect.objectContaining({
       credentials: 'include',
     }));
+  });
+
+  it('uses a same-origin API path prefix without duplicating existing API routes', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+    const { apiRequest } = await import('../services/apiClient.js');
+    await expect(apiRequest('/api/auth/session')).resolves.toEqual({ ok: true });
+    await expect(apiRequest('/health')).resolves.toEqual({ ok: true });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/auth/session', '/api/health']);
   });
 
   it('sends JSON and parses successful responses without embedding an endpoint in the UI', async () => {

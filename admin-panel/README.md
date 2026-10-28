@@ -10,7 +10,9 @@ npm run dev
 ```
 
 Create a production build with `npm run build`, or preview it with `npm run preview`.
-Set `VITE_API_BASE_URL` only when the API is hosted on a different origin; for local development Vite proxies `/api` to the Node.js API.
+For local development Vite proxies `/api` to the Node.js API. Production uses
+`VITE_API_BASE_URL=/api` so browser requests reach the API service through the
+same-origin Vercel rewrite; the API client avoids duplicating the `/api` prefix.
 
 ## Sign-in
 
@@ -49,7 +51,9 @@ The Metal Products page also contains one independent making-charge setting per 
 
 The admin-console API loads operational records from MySQL, enforces stored role permissions, and persists supported changes. Report exports are generated from current MySQL records and their type, filters, row count, and actor are recorded in `admin_reports`.
 
-Vite `VITE_*` values are bundled into client code; never use them for secrets. Use HTTPS for a deployed API and configure CORS/authentication on the server.
+Vite `VITE_*` values are bundled into client code; never use them for secrets.
+Database credentials belong only in the API service's server-side environment.
+Use HTTPS for a deployed API and configure CORS/authentication on the server.
 
 The separate Spring Boot API checklist in [SPRING_BOOT_API_CONTRACT.md](./SPRING_BOOT_API_CONTRACT.md) does not describe the Node.js authentication integration.
 

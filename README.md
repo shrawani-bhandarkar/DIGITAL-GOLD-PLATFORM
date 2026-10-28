@@ -48,6 +48,23 @@ Alternatively, from `customer-mobile-app`, run `npm run android:emulator`. Do
 not start Expo from the repository root; it is a workspace container, not an
 Expo app.
 
+## Vercel multi-service deployment
+
+The root `vercel.json` configures two services: `api` builds the Express API
+from `apps/api`, and `web` builds the functional Admin panel from `admin-panel`.
+Requests under `/api/*` route to the API service; all other public paths route
+to the Admin panel. The `apps/web` prototype and native Expo app are not
+deployed by this configuration. No service bindings are needed because there
+are no server-side calls between these services.
+
+Configure `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`,
+`JWT_SECRET`, and `KYC_ENCRYPTION_KEY` as server-side environment variables for
+the API service in Vercel. Keep the MySQL server private and never put database
+credentials or authentication secrets in frontend `VITE_*` variables. The
+Admin panel builds with `VITE_API_BASE_URL=/api` and calls the API through the
+same-origin rewrite. Authentication sessions and role-based authorization
+remain enforced by the API.
+
 ## API database
 
 The API uses MySQL 8. From Command Prompt, create the database and import the supplied schema dump:
