@@ -44,6 +44,7 @@ export default function MetalProductsPage() {
   const [formError, setFormError] = useState('');
   const [confirmProduct, setConfirmProduct] = useState(null);
   const [makingChargeForm, setMakingChargeForm] = useState(null);
+  const [makingChargeType, setMakingChargeType] = useState('fixed');
   const [makingChargeValue, setMakingChargeValue] = useState('');
   const [makingChargeEnabled, setMakingChargeEnabled] = useState(false);
   const [makingChargeError, setMakingChargeError] = useState('');
@@ -161,21 +162,34 @@ export default function MetalProductsPage() {
 
   function openMakingChargeForm(config) {
     setMakingChargeForm(config);
-    setMakingChargeValue(config.chargePerPurchase.toFixed(2));
+    setMakingChargeType(config.chargeType ?? 'fixed');
+    setMakingChargeValue(Number(config.chargeValue ?? config.chargePerPurchase ?? 0).toFixed(2));
     setMakingChargeEnabled(config.enabled);
     setMakingChargeError('');
   }
 
   async function saveMakingChargeForm(event) {
     event.preventDefault();
-    let chargePerPurchase;
+    let chargeValue;
     try {
-      chargePerPurchase = parseMoneyAmount(makingChargeValue, 'Fixed making charge per purchase', true);
+      chargeValue = makingChargeType === 'fixed'
+        ? parseMoneyAmount(makingChargeValue, 'Fixed making charge per purchase', true)
+        : Number(makingChargeValue);
+      if (
+        !Number.isFinite(chargeValue)
+        || chargeValue < 0
+        || !Number.isSafeInteger(Math.round(chargeValue * 100))
+        || (makingChargeType === 'percentage' && chargeValue > 100)
+      ) {
+        throw new Error(makingChargeType === 'percentage'
+          ? 'Percentage making charge must be between 0 and 100%.'
+          : 'Fixed making charge must be a non-negative rupee amount.');
+      }
     } catch (error) {
       setMakingChargeError(error.message);
       return;
     }
-    const result = await updateMetalMakingCharge(makingChargeForm.metal, chargePerPurchase, makingChargeEnabled);
+    const result = await updateMetalMakingCharge(makingChargeForm.metal, makingChargeType, chargeValue, makingChargeEnabled);
     if (!result.success) {
       setMakingChargeError(result.message);
       return;
@@ -222,7 +236,14 @@ export default function MetalProductsPage() {
         </div>
       ),
     },
-    { key: 'chargePerPurchase', label: 'Fixed making charge / purchase', align: 'right', render: formatCurrency },
+    {
+      key: 'chargeValue',
+      label: 'Making charge',
+      align: 'right',
+      render: (_, row) => row.chargeType === 'percentage'
+        ? `${Number(row.chargeValue).toFixed(2)}%`
+        : formatCurrency(row.chargeValue ?? row.chargePerPurchase),
+    },
     { key: 'enabled', label: 'Status', render: (value) => <StatusBadge status={value ? 'Enabled' : 'Disabled'} /> },
     { key: 'updatedAt', label: 'Last updated' },
     {
@@ -260,7 +281,7 @@ export default function MetalProductsPage() {
       </section>
       <section className="panel management-panel">
         <div className="panel-heading">
-          <div><h2>Metal-specific making charges</h2>          <p>Fixed making charges are configured independently for each metal and applied once per purchase.</p></div>
+          <div><h2>Metal-specific making charges</h2><p>Configure a fixed rupee amount or a percentage of metal value for each metal.</p></div>
         </div>
         <div className="demo-data-banner"><span className="demo-data-pulse" /><strong>STORED SETTINGS</strong><span>Making charges are saved as admin configuration; customer transactions are not triggered.</span></div>
         <DataTable columns={makingChargeColumns} rows={makingChargeRows} rowKey="metal" />
@@ -350,14 +371,22 @@ export default function MetalProductsPage() {
       >
         <form className="management-form" onSubmit={saveMakingChargeForm}>
           <p className="form-help">
-            This configured amount is charged once per purchase, regardless of weight. Making charges do not apply to sell orders.
+            Percentage charges are calculated from the metal value; fixed rupee charges are applied once per purchase. Making charges do not apply to sell orders.
           </p>
           <label className="field-block">
-            <span>Fixed making charge per purchase (₹)</span>
+            <span>Charge type</span>
+            <select value={makingChargeType} onChange={(event) => setMakingChargeType(event.target.value)}>
+              <option value="fixed">Fixed amount (₹)</option>
+              <option value="percentage">Percentage (%)</option>
+            </select>
+          </label>
+          <label className="field-block">
+            <span>{makingChargeType === 'percentage' ? 'Making charge (%)' : 'Fixed making charge per purchase (₹)'}</span>
             <input
-              aria-label="Fixed making charge per purchase (₹)"
+              aria-label={makingChargeType === 'percentage' ? 'Making charge percentage (%)' : 'Fixed making charge per purchase (₹)'}
               type="number"
               min="0"
+              max={makingChargeType === 'percentage' ? '100' : undefined}
               step="0.01"
               required
               value={makingChargeValue}

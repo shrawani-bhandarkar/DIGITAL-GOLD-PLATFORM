@@ -286,7 +286,7 @@ router.post("/logout", requireCustomer, async (request: Request, response: Respo
 
 customerProfileRouter.get("/", requireCustomer, (request: Request, response: Response) => {
   const customerRequest = request as AuthenticatedCustomerRequest;
-  const { id, name, mobileNumber, email } = customerRequest.customer;
+  const { id, name, mobileNumber, email, kycStatus } = customerRequest.customer;
   response.setHeader("Cache-Control", "no-store");
   response.json({
     profile: {
@@ -294,6 +294,7 @@ customerProfileRouter.get("/", requireCustomer, (request: Request, response: Res
       name,
       mobileNumber,
       email,
+      kycStatus,
     },
   });
 });

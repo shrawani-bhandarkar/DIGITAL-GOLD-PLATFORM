@@ -8,6 +8,7 @@ interface CustomerSessionRecord extends RowDataPacket {
   full_name: string;
   mobile: string;
   email: string | null;
+  verification_status: "PENDING" | "IN_PROGRESS" | "VERIFIED" | "REJECTED";
 }
 
 export interface AuthenticatedCustomerRequest extends Request {
@@ -16,6 +17,7 @@ export interface AuthenticatedCustomerRequest extends Request {
     name: string;
     mobileNumber: string;
     email: string | null;
+    kycStatus: "PENDING" | "APPROVED" | "REJECTED";
   };
   customerToken: string;
 }
@@ -40,7 +42,7 @@ export async function requireCustomer(
       return;
     }
     const [rows] = await database.execute<CustomerSessionRecord[]>(
-      `SELECT u.user_id, u.full_name, u.mobile, u.email
+      `SELECT u.user_id, u.full_name, u.mobile, u.email, u.verification_status
        FROM customer_auth_sessions s
        INNER JOIN users u ON u.user_id = s.user_id
        WHERE s.token_hash = ?
@@ -60,6 +62,11 @@ export async function requireCustomer(
       name: session.full_name,
       mobileNumber: session.mobile,
       email: session.email,
+      kycStatus: session.verification_status === "VERIFIED"
+        ? "APPROVED"
+        : session.verification_status === "REJECTED"
+          ? "REJECTED"
+          : "PENDING",
     };
     authenticatedRequest.customerToken = token;
     next();
@@ -67,4 +74,20 @@ export async function requireCustomer(
     console.error("Customer authorization failed:", error);
     response.status(500).json({ message: "Could not verify the customer session." });
   }
+}
+
+export function requireApprovedKyc(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): void {
+  const customerRequest = request as AuthenticatedCustomerRequest;
+  if (customerRequest.customer?.kycStatus !== "APPROVED") {
+    response.status(403).json({
+      code: "KYC_APPROVAL_REQUIRED",
+      message: "Complete KYC approval to start buying gold or investing in SIP.",
+    });
+    return;
+  }
+  next();
 }

@@ -121,6 +121,7 @@ export function calculateBuyQuote({
   feePolicy = DEMO_FEE_POLICY,
   makingChargePaise: configuredMakingChargePaise = 0,
   makingChargeEnabled = false,
+  makingChargeType = 'fixed',
 }) {
   const ratePaise = parseRatePaise(ratePerGram);
   let baseAmountPaise;
@@ -136,10 +137,18 @@ export function calculateBuyQuote({
     throw new RangeError('Choose an amount-based or quantity-based purchase.');
   }
 
-  const makingChargePaise = calculateMakingChargePaise(
-    configuredMakingChargePaise,
-    makingChargeEnabled,
-  );
+  if (!['fixed', 'percentage'].includes(makingChargeType)) throw new RangeError('Choose a supported making charge type.');
+  if (!Number.isSafeInteger(configuredMakingChargePaise) || configuredMakingChargePaise < 0) {
+    throw new RangeError('Making charge must be a non-negative whole number of paise.');
+  }
+  if (makingChargeType === 'percentage' && configuredMakingChargePaise > 10_000) {
+    throw new RangeError('Percentage making charge cannot exceed 100%.');
+  }
+  const makingChargePaise = !makingChargeEnabled
+    ? 0
+    : makingChargeType === 'percentage'
+      ? chargeFor(baseAmountPaise, configuredMakingChargePaise)
+      : calculateMakingChargePaise(configuredMakingChargePaise, true);
   const purchaseSubtotalPaise = addSafe(baseAmountPaise, makingChargePaise, 'Purchase subtotal');
   const chargePaise = chargeFor(baseAmountPaise, feePolicy.buyChargeBps);
   const taxPaise = chargeFor(chargePaise, feePolicy.buyTaxBps);

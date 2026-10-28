@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, BadgeCheck, Mail, MapPin, Phone, ShieldCheck, UserRound } from 'lucide-react';
 import PageHeader from '../components/PageHeader.jsx';
@@ -10,11 +10,35 @@ import { calculatePortfolio, calculateSellQuote, formatGrams, formatPaise, sumPa
 
 export default function CustomerDetailsPage() {
   const { customerId } = useParams();
-  const { customers, products, ledgerEntries, updateCustomer } = useManagement();
+  const { customers, products, ledgerEntries, updateCustomer, fetchCustomerKyc, reviewCustomerKyc } = useManagement();
   const customer = customers.find((item) => item.id === customerId);
+  const [kycDocuments, setKycDocuments] = useState([]);
+  const [kycLoading, setKycLoading] = useState(true);
+  const [kycError, setKycError] = useState('');
+  const [selectedDocumentType, setSelectedDocumentType] = useState('aadhaar');
+  const [documentNumber, setDocumentNumber] = useState('');
+  const [documentVisible, setDocumentVisible] = useState(false);
+  const [reviewingKyc, setReviewingKyc] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
   const [confirmAccountChange, setConfirmAccountChange] = useState(false);
   useDocumentTitle(customer ? customer.name : 'Customer not found');
+
+  useEffect(() => {
+    let active = true;
+    setKycLoading(true);
+    fetchCustomerKyc(customerId)
+      .then((documents) => {
+        if (!active) return;
+        setKycDocuments(documents);
+        const selectedType = documents[0]?.documentType ?? 'aadhaar';
+        setSelectedDocumentType(selectedType);
+        setDocumentNumber(documents.find((document) => document.documentType === selectedType)?.documentNumber ?? '');
+        setKycError('');
+      })
+      .catch((error) => { if (active) setKycError(error.message); })
+      .finally(() => { if (active) setKycLoading(false); });
+    return () => { active = false; };
+  }, [customerId, fetchCustomerKyc]);
 
   if (!customer) {
     return <section className="panel not-found-panel"><h1>Customer not found</h1><p>This customer record may have been removed.</p><Link className="button button-primary" to="/customers">Back to customers</Link></section>;
@@ -30,9 +54,32 @@ export default function CustomerDetailsPage() {
     });
   const portfolioValuePaise = sumPaise(holdings.map((holding) => holding.valuation?.grossPaise ?? 0), 'Portfolio valuation');
 
-  function reviewKyc(status) {
-    updateCustomer(customer.id, { kycStatus: status });
-    setConfirmReject(false);
+  const selectedDocument = kycDocuments.find((document) => document.documentType === selectedDocumentType);
+
+  async function reviewKyc(status) {
+    if (!documentNumber.trim() || reviewingKyc) return;
+    setReviewingKyc(true);
+    setKycError('');
+    try {
+      const result = await reviewCustomerKyc(customer.id, selectedDocumentType, documentNumber, status);
+      const savedDocument = {
+        documentType: selectedDocumentType,
+        documentNumber: documentNumber.trim(),
+        status: result.documentStatus,
+        submittedAt: new Date().toISOString(),
+        reviewedAt: status === 'Pending' ? null : new Date().toISOString(),
+      };
+      setKycDocuments((documents) => [
+        ...documents.filter((document) => document.documentType !== selectedDocumentType),
+        savedDocument,
+      ]);
+      setDocumentNumber(savedDocument.documentNumber);
+      setConfirmReject(false);
+    } catch (error) {
+      setKycError(error.message);
+    } finally {
+      setReviewingKyc(false);
+    }
   }
 
   function toggleAccountStatus() {
@@ -52,10 +99,50 @@ export default function CustomerDetailsPage() {
             <div><Mail size={16} /><span><small>Email address</small><strong>{customer.email}</strong></span></div>
             <div><Phone size={16} /><span><small>Phone number</small><strong>{customer.phone}</strong></span></div>
             <div><MapPin size={16} /><span><small>City</small><strong>{customer.city}</strong></span></div>
-            <div><ShieldCheck size={16} /><span><small>PAN</small><strong>{customer.pan}</strong></span></div>
+            <div><ShieldCheck size={16} /><span><small>Existing PAN on profile</small><strong>{customer.pan || 'Not provided'}</strong></span></div>
           </div>
-          {customer.kycStatus === 'Pending' && <div className="review-actions"><button className="button button-secondary button-reject" onClick={() => setConfirmReject(true)}>Reject verification</button><button className="button button-primary" onClick={() => reviewKyc('Verified')}><BadgeCheck size={15} /> Approve KYC</button></div>}
-          {customer.kycStatus !== 'Pending' && <p className="reviewed-note"><BadgeCheck size={15} /> Identity verification is {customer.kycStatus.toLowerCase()}.</p>}
+          <section className="customer-kyc-review">
+            <div className="panel-heading"><div><h3>KYC Details</h3><p>Enter the customer’s Aadhaar or PAN number. Document details are encrypted in MySQL and available only to authorized customer reviewers.</p></div></div>
+            {kycLoading ? <p className="empty-state" role="status">Loading saved KYC details…</p> : null}
+            <label className="field-block">
+              <span>Document type</span>
+              <select
+                aria-label="KYC document type"
+                value={selectedDocumentType}
+                onChange={(event) => {
+                  const nextType = event.target.value;
+                  setSelectedDocumentType(nextType);
+                  setDocumentNumber(kycDocuments.find((document) => document.documentType === nextType)?.documentNumber ?? '');
+                  setDocumentVisible(false);
+                  setKycError('');
+                }}
+              >
+                <option value="aadhaar">Aadhaar Card</option>
+                <option value="pan">PAN Card</option>
+              </select>
+            </label>
+            <label className="field-block">
+              <span>{selectedDocumentType === 'aadhaar' ? 'Aadhaar number' : 'PAN number'}</span>
+              <input
+                aria-label={selectedDocumentType === 'aadhaar' ? 'Aadhaar number' : 'PAN number'}
+                autoComplete="off"
+                maxLength={selectedDocumentType === 'aadhaar' ? 12 : 10}
+                onChange={(event) => setDocumentNumber(selectedDocumentType === 'pan' ? event.target.value.toUpperCase() : event.target.value.replace(/\D/g, ''))}
+                placeholder={selectedDocumentType === 'aadhaar' ? 'Enter 12-digit Aadhaar number' : 'Enter PAN number'}
+                type={documentVisible ? 'text' : 'password'}
+                value={documentNumber}
+              />
+            </label>
+            <button className="text-action" type="button" onClick={() => setDocumentVisible((visible) => !visible)}>{documentVisible ? 'Hide number' : 'Show number'}</button>
+            {selectedDocument ? <p className="reviewed-note">Current status: {selectedDocument.status}</p> : null}
+            <div className="review-actions">
+              <button className="button button-secondary" disabled={reviewingKyc || !documentNumber.trim()} onClick={() => reviewKyc('Pending')}>{reviewingKyc ? 'Saving…' : 'Save details'}</button>
+              <button className="button button-secondary button-reject" disabled={reviewingKyc || !documentNumber.trim()} onClick={() => setConfirmReject(true)}>Reject KYC</button>
+              <button className="button button-primary" disabled={reviewingKyc || !documentNumber.trim()} onClick={() => reviewKyc('Approved')}><BadgeCheck size={15} /> {reviewingKyc ? 'Saving…' : 'Approve KYC'}</button>
+            </div>
+            {selectedDocument?.submittedAt ? <p className="form-hint">Last updated {new Date(selectedDocument.submittedAt).toLocaleString()}.</p> : null}
+            {kycError ? <p className="form-feedback" role="alert">{kycError}</p> : null}
+          </section>
           <div className="account-status-actions"><span>Account access</span><button className="text-action" onClick={() => setConfirmAccountChange(true)}>{customer.status === 'Active' ? 'Suspend account' : 'Restore account'}</button></div>
         </section>
         <div className="customer-overview-column">
@@ -75,7 +162,7 @@ export default function CustomerDetailsPage() {
           <section className="panel customer-activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Sample account activity</p></div></div><div className="detail-activity-list"><div><span className="activity-marker teal-marker" /><span><strong>Customer profile created</strong><small>{customer.joined} · Account opened</small></span></div><div><span className={`activity-marker ${customer.kycStatus === 'Pending' ? 'amber-marker' : 'teal-marker'}`} /><span><strong>KYC {customer.kycStatus.toLowerCase()}</strong><small>Identity review status</small></span></div><div><span className="activity-marker blue-marker" /><span><strong>{customer.transactions} transactions</strong><small>Demo transaction history</small></span></div></div></section>
         </div>
       </div>
-      <ConfirmDialog open={confirmReject} title="Reject KYC verification?" description={`This will mark ${customer.name}'s identity verification as rejected. You can review it again later.`} confirmLabel="Reject verification" destructive onCancel={() => setConfirmReject(false)} onConfirm={() => reviewKyc('Rejected')} />
+      <ConfirmDialog open={confirmReject} title="Reject KYC?" description={`This will reject the entered ${selectedDocumentType === 'aadhaar' ? 'Aadhaar Card' : 'PAN Card'} details for ${customer.name}.`} confirmLabel="Reject KYC" destructive onCancel={() => setConfirmReject(false)} onConfirm={() => reviewKyc('Rejected')} />
       <ConfirmDialog open={confirmAccountChange} title={`${customer.status === 'Active' ? 'Suspend' : 'Restore'} customer account?`} description={`${customer.name}'s account access will be ${customer.status === 'Active' ? 'suspended' : 'restored'} in the demo.`} confirmLabel={customer.status === 'Active' ? 'Suspend account' : 'Restore account'} destructive={customer.status === 'Active'} onCancel={() => setConfirmAccountChange(false)} onConfirm={toggleAccountStatus} />
     </>
   );

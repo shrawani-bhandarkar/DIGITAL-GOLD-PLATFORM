@@ -9,6 +9,21 @@ CREATE TABLE IF NOT EXISTS admin_customer_profiles (
     FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS customer_kyc_documents (
+  user_id BIGINT NOT NULL,
+  document_type ENUM('aadhaar', 'pan') NOT NULL,
+  encrypted_document VARBINARY(64) NOT NULL,
+  encryption_iv BINARY(12) NOT NULL,
+  encryption_tag BINARY(16) NOT NULL,
+  status ENUM('PENDING', 'IN_PROGRESS', 'VERIFIED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+  consented_at DATETIME NULL,
+  submitted_at DATETIME NOT NULL,
+  reviewed_at DATETIME NULL,
+  PRIMARY KEY (user_id, document_type),
+  CONSTRAINT fk_customer_kyc_documents_user
+    FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS admin_metal_products (
   product_id VARCHAR(64) NOT NULL,
   name VARCHAR(120) NOT NULL,
@@ -50,7 +65,8 @@ CREATE TABLE IF NOT EXISTS admin_rate_requests (
 
 CREATE TABLE IF NOT EXISTS admin_metal_making_charges (
   metal VARCHAR(32) NOT NULL,
-  charge_per_purchase DECIMAL(12,2) UNSIGNED NOT NULL,
+  charge_type ENUM('fixed', 'percentage') NOT NULL DEFAULT 'fixed',
+  charge_value DECIMAL(12,2) UNSIGNED NOT NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (metal)
@@ -106,6 +122,50 @@ CREATE TABLE IF NOT EXISTS admin_sip_plans (
     FOREIGN KEY (customer_user_id) REFERENCES users (user_id) ON DELETE RESTRICT,
   CONSTRAINT fk_admin_sip_plans_product
     FOREIGN KEY (product_id) REFERENCES admin_metal_products (product_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS customer_sip_plans (
+  sip_id VARCHAR(64) NOT NULL,
+  customer_user_id BIGINT NULL,
+  product_id VARCHAR(64) NOT NULL,
+  status ENUM('Active', 'Paused', 'Completed', 'Cancelled') NOT NULL DEFAULT 'Active',
+  shop_owner_monthly_contribution DECIMAL(20, 2) UNSIGNED NOT NULL DEFAULT 0,
+  shop_owner_contribution_months SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  total_shop_owner_contribution DECIMAL(22, 2) UNSIGNED NOT NULL DEFAULT 0,
+  monthly_amount DECIMAL(20, 2) NOT NULL,
+  duration_months SMALLINT UNSIGNED NOT NULL,
+  total_customer_payments DECIMAL(22, 2) UNSIGNED NOT NULL DEFAULT 0,
+  total_investment DECIMAL(22, 2) NOT NULL,
+  start_date DATE NOT NULL,
+  maturity_date DATE NOT NULL,
+  next_due_date DATE NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (sip_id),
+  KEY ix_customer_sip_plans_customer_status (customer_user_id, status),
+  KEY ix_customer_sip_plans_next_due (next_due_date, status),
+  CONSTRAINT fk_customer_sip_plans_customer
+    FOREIGN KEY (customer_user_id) REFERENCES users (user_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_customer_sip_plans_product
+    FOREIGN KEY (product_id) REFERENCES admin_metal_products (product_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS customer_sip_installments (
+  installment_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  sip_id VARCHAR(64) NOT NULL,
+  installment_number SMALLINT UNSIGNED NOT NULL,
+  due_date DATE NOT NULL,
+  amount DECIMAL(20, 2) NOT NULL,
+  payment_status ENUM('PENDING', 'PAID', 'SKIPPED') NOT NULL DEFAULT 'PENDING',
+  paid_at DATETIME NULL,
+  skipped_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (installment_id),
+  UNIQUE KEY uq_customer_sip_installment_number (sip_id, installment_number),
+  KEY ix_customer_sip_installments_due_status (sip_id, payment_status, due_date),
+  CONSTRAINT fk_customer_sip_installments_plan
+    FOREIGN KEY (sip_id) REFERENCES customer_sip_plans (sip_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS admin_redemptions (

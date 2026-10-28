@@ -4,7 +4,7 @@ import type { RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import { z } from "zod";
 import database from "../../config/database";
-import { AuthenticatedCustomerRequest, requireCustomer } from "../customer-auth/middleware";
+import { AuthenticatedCustomerRequest, requireApprovedKyc, requireCustomer } from "../customer-auth/middleware";
 
 const router = Router();
 const MAX_AMOUNT_PAISE = 1_000_000_000;
@@ -22,8 +22,14 @@ const INDIAN_STATE_CODES = [
 function rupeesToPaise(value: unknown): bigint {
   const text = String(value ?? "0").trim();
   const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(text);
-  if (!match) throw new Error("Configured making charge must be a valid rupee amount.");
+  if (!match) throw new Error("Configured making charge must be a valid value with up to two decimal places.");
   return BigInt(match[1]) * 100n + BigInt((match[2] ?? "").padEnd(2, "0"));
+}
+
+function percentageToBasisPoints(value: unknown): bigint {
+  const basisPoints = rupeesToPaise(value);
+  if (basisPoints > 10_000n) throw new Error("Configured percentage making charge cannot exceed 100%.");
+  return basisPoints;
 }
 
 const purchaseInputSchema = z.object({
@@ -60,7 +66,8 @@ interface RateRow extends RowDataPacket {
 }
 
 interface MakingChargeRow extends RowDataPacket {
-  charge_per_purchase: string | number;
+  charge_type: "fixed" | "percentage";
+  charge_value: string | number;
   enabled: number | boolean;
   updated_at: string;
 }
@@ -87,6 +94,7 @@ interface ExistingPaymentRow extends RowDataPacket {
 
 interface CustomerRow extends RowDataPacket {
   user_id: string | number;
+  verification_status: string;
 }
 
 interface PurchaseQuote {
@@ -101,6 +109,8 @@ interface PurchaseQuote {
   quantityGrams: number;
   metalValue: number;
   makingChargePerPurchase: number;
+  makingChargeValue: number;
+  makingChargeType: "fixed" | "percentage";
   makingChargeEnabled: boolean;
   makingChargeConfigured: boolean;
   makingCharges: number;
@@ -132,7 +142,7 @@ interface ParsedInput {
 }
 
 class PurchaseRequestError extends Error {
-  constructor(message: string, readonly status: 400 | 401 | 404 | 409 | 503) {
+  constructor(message: string, readonly status: 400 | 401 | 403 | 404 | 409 | 503) {
     super(message);
     this.name = "PurchaseRequestError";
   }
@@ -269,7 +279,8 @@ function configuredTaxSettings(value: unknown): {
 function quoteFor(
   parsed: ParsedInput,
   rate: RateRow,
-  makingChargePaise: bigint,
+  makingChargeValue: bigint,
+  makingChargeType: "fixed" | "percentage",
   makingChargeEnabled: boolean,
   makingChargeConfigured: boolean,
   product: Record<string, unknown>,
@@ -305,7 +316,12 @@ function quoteFor(
   }
 
   const appliedMakingChargePaise = makingChargeConfigured
-    ? toSafePaise(makingChargePaise, "Making charge")
+    ? toSafePaise(
+      makingChargeType === "percentage"
+        ? roundDivide(BigInt(metalValuePaise) * makingChargeValue, 10_000n)
+        : makingChargeValue,
+      "Making charge",
+    )
     : 0;
   const chargesPaise = toSafePaise(
     roundDivide(BigInt(metalValuePaise) * BigInt(numericBasisPoints(product, "buyChargeBps")), 10_000n),
@@ -338,7 +354,9 @@ function quoteFor(
     inputValue: parsed.input.value,
     quantityGrams: Number(quantityMicroGrams) / Number(QUANTITY_SCALE),
     metalValue: rupees(metalValuePaise),
-    makingChargePerPurchase: Number(makingChargePaise) / 100,
+    makingChargePerPurchase: Number(makingChargeValue) / 100,
+    makingChargeValue: Number(makingChargeValue) / 100,
+    makingChargeType,
     makingChargeEnabled,
     makingChargeConfigured,
     makingCharges: rupees(appliedMakingChargePaise),
@@ -404,14 +422,18 @@ async function currentQuote(
   if (!rate) throw new PurchaseRequestError(`No current ${metal} rate is available.`, 404);
 
   const [charges] = await connection.execute<MakingChargeRow[]>(
-    `SELECT charge_per_purchase, enabled,
+    `SELECT charge_type, charge_value, enabled,
             DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
      FROM admin_metal_making_charges WHERE metal = ? LIMIT 1${lockForPurchase ? " FOR UPDATE" : ""}`,
     [metal],
   );
   const charge = charges[0];
-  const chargeValue = rupeesToPaise(charge?.charge_per_purchase ?? "0");
-  if (chargeValue < 0n) throw new Error(`Configured ${metal} making charge cannot be negative.`);
+  const chargeType = charge?.charge_type ?? "fixed";
+  if (chargeType !== "fixed" && chargeType !== "percentage") throw new Error(`Configured ${metal} making charge type is invalid.`);
+  const rawChargeValue = charge?.charge_value ?? "0";
+  const chargeValue = chargeType === "percentage"
+    ? percentageToBasisPoints(rawChargeValue)
+    : rupeesToPaise(rawChargeValue);
   const enabled = Boolean(charge?.enabled);
   const [taxSettingsRows] = await connection.execute<TaxSettingsRow[]>(
     `SELECT seller_state_code, cgst_bps, sgst_bps, igst_bps,
@@ -422,12 +444,13 @@ async function currentQuote(
     throw new PurchaseRequestError("Metal GST settings are not configured. Ask an administrator to configure GST before purchasing.", 503);
   }
   const taxSettings = configuredTaxSettings(taxSettingsRows[0]);
-  const quote = quoteFor(parsed, rate, chargeValue, enabled, Boolean(charge), productData, taxSettings);
+  const quote = quoteFor(parsed, rate, chargeValue, chargeType, enabled, Boolean(charge), productData, taxSettings);
   const sourceVersion = [
     rate.rate_id,
     rate.updated_at,
     productRow.updated_at,
     charge?.updated_at ?? "not-configured",
+    chargeType,
     chargeValue.toString(),
     enabled ? "enabled" : "disabled",
     taxSettingsRows[0].updated_at,
@@ -547,7 +570,7 @@ router.post("/purchase/quote", requireCustomer, async (request: Request, respons
   }
 });
 
-router.post("/purchase", requireCustomer, async (request: Request, response: Response) => {
+router.post("/purchase", requireCustomer, requireApprovedKyc, async (request: Request, response: Response) => {
   let connection: PoolConnection | undefined;
   try {
     const parsed = parseInput(request.body, true);
@@ -557,10 +580,16 @@ router.post("/purchase", requireCustomer, async (request: Request, response: Res
     await connection.beginTransaction();
 
     const [customers] = await connection.execute<CustomerRow[]>(
-      "SELECT user_id FROM users WHERE user_id = ? AND status = 'ACTIVE' FOR UPDATE",
+      "SELECT user_id, verification_status FROM users WHERE user_id = ? AND status = 'ACTIVE' FOR UPDATE",
       [customer.id],
     );
     if (!customers[0]) throw new PurchaseRequestError("The customer account is no longer active.", 401);
+    if (customers[0].verification_status !== "VERIFIED") {
+      throw new PurchaseRequestError(
+        "Complete KYC approval to start buying gold or investing in SIP.",
+        403,
+      );
+    }
 
     const [existingOrders] = await connection.execute<ExistingOrderRow[]>(
       `SELECT order_id, status, order_data AS record_data

@@ -49,8 +49,9 @@ export default function OrdersPage() {
           value: enteredValue,
           ratePerGram: selectedProduct.buyRate,
           feePolicy: productFeePolicy(selectedProduct),
-          makingChargePaise: parseMoneyPaise(selectedMakingCharge.chargePerPurchase),
+          makingChargePaise: parseMoneyPaise(selectedMakingCharge.chargeValue ?? selectedMakingCharge.chargePerPurchase),
           makingChargeEnabled: selectedMakingCharge.enabled,
+          makingChargeType: selectedMakingCharge.chargeType ?? 'fixed',
         })
         : calculateSellQuote({ quantity: enteredValue, ratePerGram: selectedProduct.sellRate, feePolicy: productFeePolicy(selectedProduct) });
       assertQuantityWithinConfiguredLimits(quote.quantityMilliGrams, {
@@ -102,8 +103,9 @@ export default function OrdersPage() {
           value: basis === 'amount' ? data.amount : data.quantity,
           ratePerGram: product.buyRate,
           feePolicy: productFeePolicy(product),
-          makingChargePaise: parseMoneyPaise(makingCharge.chargePerPurchase),
+          makingChargePaise: parseMoneyPaise(makingCharge.chargeValue ?? makingCharge.chargePerPurchase),
           makingChargeEnabled: makingCharge.enabled,
+          makingChargeType: makingCharge.chargeType ?? 'fixed',
         })
         : calculateSellQuote({ quantity: data.quantity, ratePerGram: product.sellRate, feePolicy: productFeePolicy(product) });
       assertQuantityWithinConfiguredLimits(calculation.quantityMilliGrams, {
@@ -138,7 +140,8 @@ export default function OrdersPage() {
       quantity: calculation.quantityMilliGrams / 1000, amount: totalPaise / 100, baseAmount: baseAmountPaise / 100,
       charges: chargePaise / 100, taxes: taxPaise / 100, rate, payment: data.payment,
       makingCharges: orderType === 'Buy' ? calculation.makingChargePaise / 100 : 0,
-      makingChargePerPurchase: orderType === 'Buy' ? makingCharge.chargePerPurchase : 0,
+      makingChargePerPurchase: orderType === 'Buy' ? makingCharge.chargeValue ?? makingCharge.chargePerPurchase : 0,
+      makingChargeType: orderType === 'Buy' ? makingCharge.chargeType ?? 'fixed' : 'fixed',
       makingChargeEnabled: orderType === 'Buy' && makingCharge.enabled,
       purchaseSubtotal: orderType === 'Buy' ? calculation.purchaseSubtotalPaise / 100 : undefined,
       status: 'Pending', placedAt: '15 Oct 2026, just now',
@@ -202,7 +205,7 @@ export default function OrdersPage() {
                 <div><span>Metal rate / gram</span><strong>{formatCurrency(selectedProduct.buyRate)}</strong></div>
                 <div><span>Weight</span><strong>{formatGrams(quote.quantityMilliGrams)}</strong></div>
                 <div><span>Metal value</span><strong>{formatPaise(quote.baseAmountPaise)}</strong></div>
-                <div><span>Fixed making charge / purchase</span><strong>{formatCurrency(selectedMakingCharge.chargePerPurchase)}{selectedMakingCharge.enabled ? '' : ' · disabled'}</strong></div>
+                <div><span>{selectedMakingCharge.chargeType === 'percentage' ? 'Making charge (% of metal value)' : 'Fixed making charge / purchase'}</span><strong>{selectedMakingCharge.chargeType === 'percentage' ? `${Number(selectedMakingCharge.chargeValue).toFixed(2)}%` : formatCurrency(selectedMakingCharge.chargeValue ?? selectedMakingCharge.chargePerPurchase)}{selectedMakingCharge.enabled ? '' : ' · disabled'}</strong></div>
                 <div><span>Total making charges</span><strong>{formatPaise(quote.makingChargePaise)}</strong></div>
                 <div className="quote-total"><span>Purchase subtotal</span><strong>{formatPaise(quote.purchaseSubtotalPaise)}</strong></div>
                 <div><span>Other demo charges</span><strong>{formatPaise(quote.chargePaise)}</strong></div>

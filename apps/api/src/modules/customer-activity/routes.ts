@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import type { RowDataPacket } from "mysql2";
 import database from "../../config/database";
-import { AuthenticatedCustomerRequest, requireCustomer } from "../customer-auth/middleware";
+import { AuthenticatedCustomerRequest, requireApprovedKyc, requireCustomer } from "../customer-auth/middleware";
 
 const router = Router();
 const DEFAULT_ACTIVITY_LIMIT = 20;
@@ -116,6 +116,10 @@ router.get("/transactions", requireCustomer, async (request: Request, response: 
     console.error("Customer activity lookup failed:", error);
     response.status(500).json({ message: "Could not load recent customer activity." });
   }
+});
+
+router.post("/sips", requireCustomer, requireApprovedKyc, (_request: Request, response: Response) => {
+  response.status(501).json({ message: "Customer SIP creation is not available yet." });
 });
 
 export default router;

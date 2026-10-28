@@ -76,6 +76,14 @@ describe('integer-based demo financial calculations', () => {
       makingChargePaise: 25000,
       makingChargeEnabled: true,
     })).toMatchObject({ quantityMilliGrams: 2000, makingChargePaise: 25000, purchaseSubtotalPaise: 1425000 });
+    expect(calculateBuyQuote({
+      basis: 'quantity',
+      value: '1',
+      ratePerGram: 7000,
+      makingChargePaise: 250,
+      makingChargeEnabled: true,
+      makingChargeType: 'percentage',
+    })).toMatchObject({ makingChargePaise: 17500, purchaseSubtotalPaise: 717500 });
     expect(calculateMakingChargePaise(1000)).toBe(1000);
     expect(calculateMakingChargePaise(25000, false)).toBe(0);
     expect(calculateBuyQuote({

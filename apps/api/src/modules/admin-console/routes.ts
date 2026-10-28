@@ -7,17 +7,20 @@ import { requireAdmin, type AuthenticatedRequest } from "../auth/middleware";
 import { calculateOrderAmounts, calculateRedemptionAmounts } from "./financial";
 import { mapMetalProduct } from "./product-data";
 import { validateNewCustomer } from "./customer-validation";
+import { decryptKycDocument, encryptKycDocument, validateKycDocument } from "../customer-auth/kyc";
 
 const router = Router();
 router.use(requireAdmin);
 
-function makingChargeAmount(value: unknown): { amount: string; paise: bigint } {
+function makingChargeAmount(value: unknown, chargeType: unknown): { amount: string; paise: bigint } {
   if (typeof value !== "string" || !/^\d+(?:\.\d{1,2})?$/.test(value)) {
-    throw new Error("Fixed making charge per purchase must be a valid amount with up to two decimal places.");
+    throw new Error("Making charge must be a non-negative value with up to two decimal places.");
   }
   const [whole, fraction = ""] = value.split(".");
   const paise = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
-  if (paise > 999_999_999_999n) throw new Error("Fixed making charge per purchase is too large.");
+  if (chargeType !== "fixed" && chargeType !== "percentage") throw new Error("Choose a supported making charge type.");
+  if (chargeType === "percentage" && paise > 10_000n) throw new Error("Percentage making charge cannot exceed 100%.");
+  if (paise > 999_999_999_999n) throw new Error("Making charge is too large.");
   return { amount: `${whole}.${fraction.padEnd(2, "0")}`, paise };
 }
 
@@ -134,15 +137,16 @@ function parseJson<T>(value: unknown): T {
 }
 
 function customerRecord(row: RowDataPacket): Record<string, unknown> {
+  const pan = typeof row.pan === "string" ? row.pan : "";
   return {
     id: `CUS-${row.user_id}`,
     name: row.full_name,
     email: row.email ?? "",
     phone: row.mobile ?? "",
     city: row.city ?? "",
-    pan: row.pan ?? "",
+    pan: pan ? `${pan.slice(0, 3)}*****${pan.slice(-1)}` : "",
     joined: row.created_at,
-    kycStatus: row.verification_status === "VERIFIED" ? "Verified" : row.verification_status === "REJECTED" ? "Rejected" : row.verification_status === "IN_PROGRESS" ? "In review" : "Pending",
+    kycStatus: row.verification_status === "VERIFIED" ? "Approved" : row.verification_status === "REJECTED" ? "Rejected" : "Pending",
     status: row.status === "ACTIVE" ? "Active" : "Suspended",
     transactions: Number(row.transactions ?? 0),
   };
@@ -155,6 +159,113 @@ function userIdFromCustomerId(customerId: unknown): number {
   const id = Number(customerId.slice(4));
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Choose an existing customer.");
   return id;
+}
+
+function addSipMonths(date: string, months: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const targetMonth = month - 1 + months;
+  const targetYear = year + Math.floor(targetMonth / 12);
+  const monthIndex = targetMonth % 12;
+  const lastDay = new Date(Date.UTC(targetYear, monthIndex + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(targetYear, monthIndex, Math.min(day, lastDay))).toISOString().slice(0, 10);
+}
+
+function sipRecord(row: RowDataPacket): Record<string, unknown> {
+  return {
+    id: row.id,
+    customerId: row.customer_user_id == null ? null : `CUS-${row.customer_user_id}`,
+    customer: row.customer_name ?? null,
+    productId: row.product_id,
+    metal: row.metal,
+    purity: row.purity,
+    monthlyContribution: Number(row.shop_owner_monthly_contribution),
+    contributionDurationMonths: Number(row.shop_owner_contribution_months),
+    totalShopOwnerContribution: Number(row.total_shop_owner_contribution),
+    amount: Number(row.monthly_amount),
+    durationMonths: Number(row.duration_months),
+    totalCustomerPayments: Number(row.total_customer_payments),
+    totalInvestment: Number(row.total_investment),
+    startDate: row.start_date,
+    maturityDate: row.maturity_date,
+    nextDebit: row.next_due_date,
+    paidCount: Number(row.paid_count ?? 0),
+    pendingCount: Number(row.pending_count ?? 0),
+    skippedCount: Number(row.skipped_count ?? 0),
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+function sipInstallmentRecord(row: RowDataPacket): Record<string, unknown> {
+  return {
+    id: Number(row.installment_id),
+    number: Number(row.installment_number),
+    dueDate: row.due_date,
+    amount: Number(row.amount),
+    status: row.payment_status,
+    paidAt: row.paid_at,
+    skippedAt: row.skipped_at,
+  };
+}
+
+async function loadSipPlan(connection: Pool | PoolConnection, sipId: string): Promise<Record<string, unknown> | null> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT p.sip_id AS id, p.customer_user_id, u.full_name AS customer_name,
+            p.product_id, m.metal, m.purity, p.shop_owner_monthly_contribution,
+            p.shop_owner_contribution_months, p.total_shop_owner_contribution,
+            p.monthly_amount, p.duration_months, p.total_customer_payments,
+            p.total_investment, DATE_FORMAT(p.start_date, '%Y-%m-%d') AS start_date,
+            DATE_FORMAT(p.maturity_date, '%Y-%m-%d') AS maturity_date,
+            DATE_FORMAT(p.next_due_date, '%Y-%m-%d') AS next_due_date,
+            p.status, p.created_at,
+            COALESCE(i.paid_count, 0) AS paid_count,
+            COALESCE(i.pending_count, 0) AS pending_count,
+            COALESCE(i.skipped_count, 0) AS skipped_count
+     FROM customer_sip_plans p
+     LEFT JOIN users u ON u.user_id = p.customer_user_id
+     INNER JOIN admin_metal_products m ON m.product_id = p.product_id
+     LEFT JOIN (
+       SELECT sip_id,
+              SUM(payment_status = 'PAID') AS paid_count,
+              SUM(payment_status = 'PENDING') AS pending_count,
+              SUM(payment_status = 'SKIPPED') AS skipped_count
+       FROM customer_sip_installments GROUP BY sip_id
+     ) i ON i.sip_id = p.sip_id
+     WHERE p.sip_id = ?`,
+    [sipId],
+  );
+  return rows[0] ? sipRecord(rows[0]) : null;
+}
+
+async function loadSipInstallments(connection: Pool | PoolConnection, sipId: string): Promise<Record<string, unknown>[]> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT installment_id, installment_number,
+            DATE_FORMAT(due_date, '%Y-%m-%d') AS due_date, amount, payment_status,
+            paid_at, skipped_at
+     FROM customer_sip_installments
+     WHERE sip_id = ?
+     ORDER BY installment_number`,
+    [sipId],
+  );
+  return rows.map(sipInstallmentRecord);
+}
+
+function sipRequestError(response: Response, error: unknown): void {
+  if (error instanceof Error && "status" in error && typeof error.status === "number") {
+    response.status(error.status).json({ message: error.message });
+    return;
+  }
+  if (error && typeof error === "object" && "code" in error) {
+    const code = String(error.code);
+    if (code === "ER_DUP_ENTRY") {
+      response.status(409).json({ message: "A SIP plan with these details already exists." });
+      return;
+    }
+    console.error("SIP database operation failed:", error);
+    response.status(500).json({ message: "Could not save SIP plan details." });
+    return;
+  }
+  response.status(400).json({ message: error instanceof Error ? error.message : "SIP request is invalid." });
 }
 
 function requiredString(value: unknown, label: string): string {
@@ -256,14 +367,37 @@ router.get("/state", async (request, response) => {
     );
     const [rateRequests] = await database.execute<JsonRow[]>("SELECT request_data AS record_data FROM admin_rate_requests ORDER BY requested_at DESC");
     const [makingCharges] = await database.execute<RowDataPacket[]>(
-      `SELECT metal, charge_per_purchase, enabled, updated_at
+      `SELECT metal, charge_type, charge_value, enabled, updated_at
        FROM admin_metal_making_charges ORDER BY metal`,
     );
     const [metalTaxSettings] = await database.execute<RowDataPacket[]>(
       "SELECT seller_state_code, cgst_bps, sgst_bps, igst_bps, updated_at FROM admin_metal_gst_settings WHERE settings_id = 1 LIMIT 1",
     );
     const [orders] = await database.execute<JsonRow[]>("SELECT order_data AS record_data FROM admin_orders ORDER BY placed_at DESC");
-    const [sips] = await database.execute<JsonRow[]>("SELECT sip_data AS record_data FROM admin_sip_plans ORDER BY created_at DESC");
+    const [sips] = await database.execute<RowDataPacket[]>(
+      `SELECT p.sip_id AS id, p.customer_user_id, u.full_name AS customer_name,
+              p.product_id, m.metal, m.purity, p.shop_owner_monthly_contribution,
+              p.shop_owner_contribution_months, p.total_shop_owner_contribution,
+              p.monthly_amount, p.duration_months, p.total_customer_payments,
+              p.total_investment, DATE_FORMAT(p.start_date, '%Y-%m-%d') AS start_date,
+              DATE_FORMAT(p.maturity_date, '%Y-%m-%d') AS maturity_date,
+              DATE_FORMAT(p.next_due_date, '%Y-%m-%d') AS next_due_date,
+              p.status, p.created_at,
+              COALESCE(i.paid_count, 0) AS paid_count,
+              COALESCE(i.pending_count, 0) AS pending_count,
+              COALESCE(i.skipped_count, 0) AS skipped_count
+       FROM customer_sip_plans p
+       LEFT JOIN users u ON u.user_id = p.customer_user_id
+       INNER JOIN admin_metal_products m ON m.product_id = p.product_id
+       LEFT JOIN (
+         SELECT sip_id,
+                SUM(payment_status = 'PAID') AS paid_count,
+                SUM(payment_status = 'PENDING') AS pending_count,
+                SUM(payment_status = 'SKIPPED') AS skipped_count
+         FROM customer_sip_installments GROUP BY sip_id
+       ) i ON i.sip_id = p.sip_id
+       ORDER BY p.created_at DESC, p.sip_id DESC`,
+    );
     const [redemptions] = await database.execute<JsonRow[]>("SELECT redemption_data AS record_data FROM admin_redemptions ORDER BY requested_at DESC");
     const [gifts] = await database.execute<JsonRow[]>("SELECT gift_data AS record_data FROM admin_gifts ORDER BY created_at DESC");
     const [payments] = await database.execute<JsonRow[]>("SELECT payment_data AS record_data FROM admin_payments ORDER BY created_at DESC");
@@ -289,7 +423,8 @@ router.get("/state", async (request, response) => {
       rateRequests: (permissions.products ? rateRequests : []).map((row) => parseJson(row.record_data)),
       metalMakingCharges: (permissions.products ? makingCharges : []).map((row) => ({
         metal: row.metal,
-        chargePerPurchase: Number(row.charge_per_purchase),
+        chargeType: row.charge_type,
+        chargeValue: Number(row.charge_value),
         enabled: Boolean(row.enabled),
         updatedAt: row.updated_at,
       })),
@@ -303,7 +438,7 @@ router.get("/state", async (request, response) => {
         }
         : null,
       orders: (permissions.orders || permissions.reports ? orders : []).map((row) => parseJson(row.record_data)),
-      sips: (permissions.orders ? sips : []).map((row) => parseJson(row.record_data)),
+      sips: (permissions.orders ? sips : []).map(sipRecord),
       redemptions: (permissions.fulfillment ? redemptions : []).map((row) => parseJson(row.record_data)),
       gifts: (permissions.fulfillment ? gifts : []).map((row) => parseJson(row.record_data)),
       payments: (permissions.finance || permissions.reports ? payments : []).map((row) => parseJson(row.record_data)),
@@ -341,6 +476,128 @@ router.get("/customers", requirePermission("customers"), async (_request, respon
   } catch (error) {
     console.error("Admin customer list lookup failed:", error);
     response.status(500).json({ message: "Could not load customer profiles." });
+  }
+});
+
+router.get("/customers/:customerId/kyc", requirePermission("customers"), async (request, response) => {
+  let userId: number;
+  try {
+    userId = userIdFromCustomerId(request.params.customerId);
+  } catch (error) {
+    requestError(response, error);
+    return;
+  }
+  try {
+    const [documents] = await database.execute<RowDataPacket[]>(
+      `SELECT document_type, encrypted_document, encryption_iv, encryption_tag, status, submitted_at, reviewed_at
+       FROM customer_kyc_documents
+       WHERE user_id = ?
+       ORDER BY submitted_at DESC`,
+      [userId],
+    );
+    response.setHeader("Cache-Control", "no-store");
+    response.json({
+      documents: documents.map((document) => ({
+        documentType: document.document_type,
+        documentNumber: decryptKycDocument(
+          Buffer.from(document.encrypted_document),
+          Buffer.from(document.encryption_iv),
+          Buffer.from(document.encryption_tag),
+        ),
+        status: document.status === "VERIFIED" ? "Approved" : document.status === "REJECTED" ? "Rejected" : "Pending",
+        submittedAt: document.submitted_at,
+        reviewedAt: document.reviewed_at,
+      })),
+    });
+  } catch (error) {
+    console.error("Admin customer KYC lookup failed:", error);
+    response.status(500).json({ message: "Could not load customer KYC documents." });
+  }
+});
+
+router.patch("/customers/:customerId/kyc", requirePermission("customers"), async (request, response) => {
+  const userId = (() => {
+    try { return userIdFromCustomerId(request.params.customerId); } catch { return null; }
+  })();
+  if (userId === null) { response.status(400).json({ message: "Choose an existing customer." }); return; }
+  const body = request.body && typeof request.body === "object" && !Array.isArray(request.body)
+    ? request.body as Record<string, unknown>
+    : {};
+  const { documentType, documentNumber, status } = body;
+  if (Object.keys(body).some((key) => !["documentType", "documentNumber", "status"].includes(key))) {
+    response.status(400).json({ message: "Only the selected document details and KYC status may be updated." });
+    return;
+  }
+  const requestedStatus = status === "Verified" ? "Approved" : status;
+  if (requestedStatus !== "Pending" && requestedStatus !== "Approved" && requestedStatus !== "Rejected") {
+    response.status(400).json({ message: "Choose Pending, Approved, or Rejected for the KYC status." });
+    return;
+  }
+  let document: ReturnType<typeof validateKycDocument>;
+  try {
+    document = validateKycDocument(documentType, documentNumber);
+  } catch (error) {
+    response.status(400).json({ message: error instanceof Error ? error.message : "The KYC document is invalid." });
+    return;
+  }
+  let encrypted: ReturnType<typeof encryptKycDocument>;
+  try {
+    encrypted = encryptKycDocument(document.documentNumber);
+  } catch (error) {
+    console.error("Customer KYC encryption failed:", error);
+    response.status(500).json({ message: "Could not securely store customer KYC details." });
+    return;
+  }
+  const documentStatus = requestedStatus === "Approved" ? "VERIFIED" : requestedStatus.toUpperCase();
+  let connection: PoolConnection | undefined;
+  try {
+    connection = await database.getConnection();
+    await connection.beginTransaction();
+    await connection.execute(
+      `INSERT INTO customer_kyc_documents
+         (user_id, document_type, encrypted_document, encryption_iv, encryption_tag, status, consented_at, submitted_at, reviewed_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, UTC_TIMESTAMP(), IF(? = 'PENDING', NULL, UTC_TIMESTAMP()))
+       ON DUPLICATE KEY UPDATE encrypted_document = VALUES(encrypted_document),
+         encryption_iv = VALUES(encryption_iv), encryption_tag = VALUES(encryption_tag),
+         status = VALUES(status), consented_at = NULL, submitted_at = UTC_TIMESTAMP(),
+         reviewed_at = VALUES(reviewed_at)`,
+      [userId, document.documentType, encrypted.ciphertext, encrypted.iv, encrypted.authTag, documentStatus, documentStatus],
+    );
+    const [statuses] = await connection.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total,
+              SUM(status = 'VERIFIED') AS verified,
+              SUM(status IN ('PENDING', 'IN_PROGRESS')) AS pending
+       FROM customer_kyc_documents WHERE user_id = ?`,
+      [userId],
+    );
+    const overallStatus = Number(statuses[0]?.verified) > 0
+      ? "VERIFIED"
+      : Number(statuses[0]?.pending) > 0
+        ? "PENDING"
+        : "REJECTED";
+    await connection.execute("UPDATE users SET verification_status = ? WHERE user_id = ?", [overallStatus, userId]);
+    await connection.execute(
+      "INSERT INTO user_verification (user_id, verification_type, status) VALUES (?, ?, ?)",
+      [userId, document.documentType === "aadhaar" ? "AADHAAR" : "PAN", documentStatus],
+    );
+    await connection.commit();
+    response.setHeader("Cache-Control", "no-store");
+    response.json({
+      success: true,
+      documentType: document.documentType,
+      documentStatus: requestedStatus,
+      kycStatus: overallStatus === "VERIFIED" ? "Approved" : overallStatus === "REJECTED" ? "Rejected" : "Pending",
+    });
+  } catch (error) {
+    if (connection) {
+      await connection.rollback().catch((rollbackError: unknown) => {
+        console.error("Admin customer KYC review rollback failed:", rollbackError);
+      });
+    }
+    console.error("Admin customer KYC review failed:", error);
+    response.status(500).json({ message: "Could not update customer KYC status." });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -498,6 +755,10 @@ router.patch("/customers/:customerId", requirePermission("customers"), async (re
   try {
     const userId = userIdFromCustomerId(request.params.customerId);
     const updates = request.body as Record<string, unknown>;
+    if (Object.hasOwn(updates, "kycStatus")) {
+      response.status(400).json({ message: "Review KYC against a submitted document." });
+      return;
+    }
     const [users] = await database.execute<RowDataPacket[]>("SELECT user_id FROM users WHERE user_id = ? LIMIT 1", [userId]);
     if (!users[0]) { response.status(404).json({ message: "Customer was not found." }); return; }
     if (typeof updates.status === "string") {
@@ -555,18 +816,21 @@ router.put("/making-charges/:metal", requirePermission("products"), async (reque
     if (!request.body || typeof request.body !== "object" || Array.isArray(request.body)) {
       throw new Error("Provide making-charge settings.");
     }
-    const { chargePerPurchase, enabled } = request.body as Record<string, unknown>;
-    if (typeof enabled !== "boolean") {
-      throw new Error("Fixed making charge per purchase must be a non-negative amount and have an explicit enabled status.");
+    const { chargeType, chargeValue, enabled } = request.body as Record<string, unknown>;
+    if (chargeType !== "fixed" && chargeType !== "percentage") {
+      throw new Error("Choose a supported making charge type.");
     }
-    const parsedCharge = makingChargeAmount(chargePerPurchase);
+    if (typeof enabled !== "boolean") {
+      throw new Error("Making charge must have a non-negative value and an explicit enabled status.");
+    }
+    const parsedCharge = makingChargeAmount(chargeValue, chargeType);
     await database.execute(
-      `INSERT INTO admin_metal_making_charges (metal, charge_per_purchase, enabled) VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE charge_per_purchase = VALUES(charge_per_purchase), enabled = VALUES(enabled)`,
-      [metal, parsedCharge.amount, enabled],
+      `INSERT INTO admin_metal_making_charges (metal, charge_type, charge_value, enabled) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE charge_type = VALUES(charge_type), charge_value = VALUES(charge_value), enabled = VALUES(enabled)`,
+      [metal, chargeType, parsedCharge.amount, enabled],
     );
     const [rows] = await database.execute<RowDataPacket[]>(
-      `SELECT metal, charge_per_purchase, enabled, updated_at
+      `SELECT metal, charge_type, charge_value, enabled, updated_at
        FROM admin_metal_making_charges
        WHERE metal = ?
        LIMIT 1`,
@@ -575,7 +839,8 @@ router.put("/making-charges/:metal", requirePermission("products"), async (reque
     const saved = rows[0];
     if (
       !saved
-      || makingChargeAmount(String(saved.charge_per_purchase)).paise !== parsedCharge.paise
+      || saved.charge_type !== chargeType
+      || makingChargeAmount(String(saved.charge_value), saved.charge_type).paise !== parsedCharge.paise
       || Boolean(saved.enabled) !== enabled
     ) {
       throw new Error(`Could not verify the saved ${metal} making charge in the database.`);
@@ -584,7 +849,8 @@ router.put("/making-charges/:metal", requirePermission("products"), async (reque
       success: true,
       makingCharge: {
         metal: saved.metal,
-        chargePerPurchase: Number(saved.charge_per_purchase),
+        chargeType: saved.charge_type,
+        chargeValue: Number(saved.charge_value),
         enabled: Boolean(saved.enabled),
         updatedAt: saved.updated_at,
       },
@@ -683,8 +949,14 @@ router.post("/orders", requirePermission("orders"), async (request, response) =>
     const [productRows] = await connection.execute<JsonRow[]>("SELECT status, product_data AS record_data FROM admin_metal_products WHERE product_id = ? LIMIT 1", [productId]);
     if (!productRows[0] || productRows[0].status !== "Active") throw new Error("Choose an active metal product.");
     const product = parseJson<Record<string, unknown>>(productRows[0].record_data);
-    const [makingChargeRows] = await connection.execute<RowDataPacket[]>("SELECT charge_per_purchase, enabled FROM admin_metal_making_charges WHERE metal = ? LIMIT 1", [String(product.metal)]);
-    const pricedOrder = calculateOrderAmounts({ ...data, type }, product, String(makingChargeRows[0]?.charge_per_purchase ?? "0"), Boolean(makingChargeRows[0]?.enabled));
+    const [makingChargeRows] = await connection.execute<RowDataPacket[]>("SELECT charge_type, charge_value, enabled FROM admin_metal_making_charges WHERE metal = ? LIMIT 1", [String(product.metal)]);
+    const pricedOrder = calculateOrderAmounts(
+      { ...data, type },
+      product,
+      String(makingChargeRows[0]?.charge_value ?? "0"),
+      Boolean(makingChargeRows[0]?.enabled),
+      makingChargeRows[0]?.charge_type === "percentage" ? "percentage" : "fixed",
+    );
     const quantity = Number(pricedOrder.quantity);
     const amount = Number(pricedOrder.amount);
     if (type === "Sell") await connection.execute("SELECT user_id FROM users WHERE user_id = ? FOR UPDATE", [userId]);
@@ -715,8 +987,256 @@ router.post("/orders", requirePermission("orders"), async (request, response) =>
 });
 
 router.patch("/orders/:orderId", requirePermission("orders"), async (request, response) => updateTimelineRecord(response, "admin_orders", "order_id", "order_data", "Order", String(request.params.orderId), request.body.status));
-router.post("/sips", requirePermission("orders"), async (request, response) => createRelatedRecord(response, "admin_sip_plans", request.body));
-router.patch("/sips/:sipId", requirePermission("orders"), async (request, response) => updateTimelineRecord(response, "admin_sip_plans", "sip_id", "sip_data", "SIP plan", String(request.params.sipId), request.body.status));
+router.get("/sips/:sipId", requirePermission("orders"), async (request, response) => {
+  try {
+    const sipId = requiredString(request.params.sipId, "SIP plan");
+    const sip = await loadSipPlan(database, sipId);
+    if (!sip) { response.status(404).json({ message: "SIP plan was not found." }); return; }
+    response.setHeader("Cache-Control", "no-store");
+    response.json({ sip, installments: await loadSipInstallments(database, sipId) });
+  } catch (error) {
+    sipRequestError(response, error);
+  }
+});
+router.post("/sips", requirePermission("orders"), async (request, response) => {
+  let connection: PoolConnection | undefined;
+  try {
+    const body = request.body && typeof request.body === "object" && !Array.isArray(request.body)
+      ? request.body as Record<string, unknown>
+      : {};
+    if (Object.keys(body).some((key) => ![
+      "productId",
+      "contributionMonthlyAmount",
+      "contributionDurationMonths",
+      "monthlyAmount",
+      "durationMonths",
+    ].includes(key))) {
+      response.status(400).json({ message: "Provide only the metal product and separate owner/customer monthly amounts and durations." });
+      return;
+    }
+    const productId = requiredString(body.productId, "Metal");
+    const parseSipAmount = (value: unknown, label: string): { amount: string; paise: bigint } => {
+      const amountText = typeof value === "number" && Number.isFinite(value)
+        ? String(value)
+        : typeof value === "string" ? value.trim() : "";
+      if (!/^\d{1,9}(?:\.\d{1,2})?$/.test(amountText) || Number(amountText) <= 0) {
+        throw new Error(`${label} must be a positive rupee amount with up to two decimals.`);
+      }
+      const [whole, fraction = ""] = amountText.split(".");
+      return {
+        amount: `${whole}.${fraction.padEnd(2, "0")}`,
+        paise: BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0")),
+      };
+    };
+    const ownerContribution = parseSipAmount(body.contributionMonthlyAmount, "Shop owner monthly contribution");
+    const customerPayment = parseSipAmount(body.monthlyAmount, "Customer monthly payment");
+    const contributionDurationMonths = Number(body.contributionDurationMonths);
+    if (!Number.isInteger(contributionDurationMonths) || contributionDurationMonths < 1 || contributionDurationMonths > 60) {
+      response.status(400).json({ message: "Shop owner contribution duration must be between 1 and 60 months." });
+      return;
+    }
+    const durationMonths = Number(body.durationMonths);
+    if (!Number.isInteger(durationMonths) || durationMonths < 2 || durationMonths > 60) {
+      response.status(400).json({ message: "Customer payment duration must be between 2 and 60 months." });
+      return;
+    }
+    const totalOwnerContributionPaise = ownerContribution.paise * BigInt(contributionDurationMonths);
+    const totalCustomerPaymentsPaise = customerPayment.paise * BigInt(durationMonths);
+    const totalInvestmentPaise = totalOwnerContributionPaise + totalCustomerPaymentsPaise;
+    const totalOwnerContribution = (Number(totalOwnerContributionPaise) / 100).toFixed(2);
+    const totalCustomerPayments = (Number(totalCustomerPaymentsPaise) / 100).toFixed(2);
+    const totalInvestment = (Number(totalInvestmentPaise) / 100).toFixed(2);
+    const startDate = new Date().toISOString().slice(0, 10);
+    const customerStartDate = addSipMonths(startDate, contributionDurationMonths);
+    const maturityDate = addSipMonths(customerStartDate, durationMonths - 1);
+    const sipId = `SIP-${randomUUID()}`;
+    connection = await database.getConnection();
+    await connection.beginTransaction();
+    const [products] = await connection.execute<RowDataPacket[]>(
+      `SELECT product_id FROM admin_metal_products
+       WHERE product_id = ? AND status IN ('ACTIVE', 'Active') LIMIT 1`,
+      [productId],
+    );
+    if (!products[0]) {
+      await connection.rollback();
+      response.status(400).json({ message: "Choose an active metal product." });
+      return;
+    }
+    await connection.execute(
+      `INSERT INTO customer_sip_plans
+         (sip_id, customer_user_id, product_id, status, shop_owner_monthly_contribution,
+          shop_owner_contribution_months, total_shop_owner_contribution, monthly_amount,
+          duration_months, total_customer_payments, total_investment, start_date, maturity_date, next_due_date)
+       VALUES (?, NULL, ?, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        sipId, productId, ownerContribution.amount, contributionDurationMonths,
+        totalOwnerContribution, customerPayment.amount, durationMonths,
+        totalCustomerPayments, totalInvestment, startDate, maturityDate, customerStartDate,
+      ],
+    );
+    for (let index = 0; index < durationMonths; index += 1) {
+      await connection.execute(
+        `INSERT INTO customer_sip_installments (sip_id, installment_number, due_date, amount)
+         VALUES (?, ?, ?, ?)`,
+        [sipId, index + 1, addSipMonths(customerStartDate, index), customerPayment.amount],
+      );
+    }
+    const sip = await loadSipPlan(connection, sipId);
+    await connection.commit();
+    response.status(201).json({ sip });
+  } catch (error) {
+    if (connection) {
+      await connection.rollback().catch((rollbackError: unknown) => {
+        console.error("SIP plan creation rollback failed:", rollbackError);
+      });
+    }
+    sipRequestError(response, error);
+  } finally {
+    connection?.release();
+  }
+});
+router.patch("/sips/:sipId", requirePermission("orders"), async (request, response) => {
+  let connection: PoolConnection | undefined;
+  try {
+    const sipId = requiredString(request.params.sipId, "SIP plan");
+    const status = requiredString(request.body?.status, "SIP status");
+    if (!["Active", "Paused", "Cancelled"].includes(status)) {
+      response.status(400).json({ message: "Choose Active, Paused, or Cancelled." });
+      return;
+    }
+    connection = await database.getConnection();
+    await connection.beginTransaction();
+    const [plans] = await connection.execute<RowDataPacket[]>(
+      "SELECT status FROM customer_sip_plans WHERE sip_id = ? FOR UPDATE",
+      [sipId],
+    );
+    if (!plans[0]) {
+      await connection.rollback();
+      response.status(404).json({ message: "SIP plan was not found." });
+      return;
+    }
+    const currentStatus = String(plans[0].status);
+    const allowed = currentStatus === "Active" ? ["Paused", "Cancelled"] : currentStatus === "Paused" ? ["Active", "Cancelled"] : [];
+    if (currentStatus !== status && !allowed.includes(status)) {
+      await connection.rollback();
+      response.status(409).json({ message: `Cannot change SIP plan from ${currentStatus} to ${status}.` });
+      return;
+    }
+    await connection.execute("UPDATE customer_sip_plans SET status = ? WHERE sip_id = ?", [status, sipId]);
+    const sip = await loadSipPlan(connection, sipId);
+    await connection.commit();
+    response.json({ sip });
+  } catch (error) {
+    if (connection) await connection.rollback().catch((rollbackError: unknown) => {
+      console.error("SIP status rollback failed:", rollbackError);
+    });
+    sipRequestError(response, error);
+  } finally {
+    connection?.release();
+  }
+});
+router.post("/sips/:sipId/installments", requirePermission("orders"), async (request, response) => {
+  let connection: PoolConnection | undefined;
+  try {
+    const sipId = requiredString(request.params.sipId, "SIP plan");
+    const action = request.body?.action;
+    if (action !== "paid" && action !== "skip") {
+      response.status(400).json({ message: "Choose whether to mark the next installment paid or skipped." });
+      return;
+    }
+    connection = await database.getConnection();
+    await connection.beginTransaction();
+    const [plans] = await connection.execute<RowDataPacket[]>(
+      `SELECT duration_months, monthly_amount,
+              DATE_FORMAT(maturity_date, '%Y-%m-%d') AS maturity_date, status
+       FROM customer_sip_plans WHERE sip_id = ? FOR UPDATE`,
+      [sipId],
+    );
+    const plan = plans[0];
+    if (!plan) {
+      await connection.rollback();
+      response.status(404).json({ message: "SIP plan was not found." });
+      return;
+    }
+    if (plan.status !== "Active") {
+      await connection.rollback();
+      response.status(409).json({ message: "Only active SIP plans can update installments." });
+      return;
+    }
+    const [installments] = await connection.execute<RowDataPacket[]>(
+      `SELECT installment_id, installment_number, due_date
+       FROM customer_sip_installments
+       WHERE sip_id = ? AND payment_status = 'PENDING'
+       ORDER BY due_date, installment_number LIMIT 1 FOR UPDATE`,
+      [sipId],
+    );
+    const installment = installments[0];
+    if (!installment) {
+      await connection.rollback();
+      response.status(409).json({ message: "This SIP plan has no pending installments." });
+      return;
+    }
+    if (action === "paid") {
+      await connection.execute(
+        "UPDATE customer_sip_installments SET payment_status = 'PAID', paid_at = UTC_TIMESTAMP() WHERE installment_id = ?",
+        [installment.installment_id],
+      );
+    } else {
+      await connection.execute(
+        "UPDATE customer_sip_installments SET payment_status = 'SKIPPED', skipped_at = UTC_TIMESTAMP() WHERE installment_id = ?",
+        [installment.installment_id],
+      );
+      const nextDueDate = addSipMonths(String(plan.maturity_date).slice(0, 10), 1);
+      const [lastNumberRows] = await connection.execute<RowDataPacket[]>(
+        "SELECT MAX(installment_number) AS last_number FROM customer_sip_installments WHERE sip_id = ?",
+        [sipId],
+      );
+      await connection.execute(
+        `INSERT INTO customer_sip_installments (sip_id, installment_number, due_date, amount)
+         VALUES (?, ?, ?, ?)`,
+        [
+          sipId,
+          Number(lastNumberRows[0]?.last_number ?? 0) + 1,
+          nextDueDate,
+          plan.monthly_amount,
+        ],
+      );
+      await connection.execute(
+        "UPDATE customer_sip_plans SET maturity_date = ? WHERE sip_id = ?",
+        [nextDueDate, sipId],
+      );
+    }
+    const [counts] = await connection.execute<RowDataPacket[]>(
+      `SELECT SUM(payment_status = 'PAID') AS paid_count,
+              MIN(CASE WHEN payment_status = 'PENDING' THEN due_date END) AS next_due_date
+       FROM customer_sip_installments WHERE sip_id = ?`,
+      [sipId],
+    );
+    const paidCount = Number(counts[0]?.paid_count ?? 0);
+    if (paidCount >= Number(plan.duration_months)) {
+      await connection.execute(
+        "UPDATE customer_sip_plans SET status = 'Completed', next_due_date = NULL WHERE sip_id = ?",
+        [sipId],
+      );
+    } else {
+      await connection.execute(
+        "UPDATE customer_sip_plans SET next_due_date = ? WHERE sip_id = ?",
+        [counts[0]?.next_due_date ?? null, sipId],
+      );
+    }
+    const sip = await loadSipPlan(connection, sipId);
+    const updatedInstallments = await loadSipInstallments(connection, sipId);
+    await connection.commit();
+    response.json({ sip, installments: updatedInstallments });
+  } catch (error) {
+    if (connection) await connection.rollback().catch((rollbackError: unknown) => {
+      console.error("SIP installment rollback failed:", rollbackError);
+    });
+    sipRequestError(response, error);
+  } finally {
+    connection?.release();
+  }
+});
 router.post("/redemptions", requirePermission("fulfillment"), async (request, response) => createRelatedRecord(response, "admin_redemptions", request.body));
 router.patch("/redemptions/:redemptionId", requirePermission("fulfillment"), async (request, response) => updateTimelineRecord(response, "admin_redemptions", "redemption_id", "redemption_data", "Redemption", String(request.params.redemptionId), request.body.status));
 router.post("/gifts", requirePermission("fulfillment"), async (request, response) => createRelatedRecord(response, "admin_gifts", request.body));
@@ -823,7 +1343,7 @@ router.post("/settlements", requirePermission("finance"), async (request, respon
 
 async function createRelatedRecord(
   response: Response,
-  table: "admin_sip_plans" | "admin_redemptions" | "admin_gifts",
+  table: "admin_redemptions" | "admin_gifts",
   body: unknown,
 ): Promise<void> {
   try {
@@ -839,17 +1359,7 @@ async function createRelatedRecord(
     if (!productRows[0] || productRows[0].status !== "Active") throw new Error("Choose an active metal product.");
     const product = parseJson<Record<string, unknown>>(productRows[0].record_data);
     if (amount < Number(product.minOrder) || amount > Number(product.maxOrder)) throw new Error("Amount is outside this product's configured limits.");
-    if (table === "admin_sip_plans") {
-      const frequency = requiredString(data.frequency, "Frequency");
-      if (!["Weekly", "Monthly"].includes(frequency)) throw new Error("Choose a supported SIP frequency.");
-      const nextDebit = typeof data.nextDebit === "string" ? data.nextDebit.slice(0, 10) : null;
-      if (!nextDebit || Number.isNaN(Date.parse(nextDebit))) throw new Error("Choose a valid SIP debit date.");
-      await database.execute(
-        `INSERT INTO admin_sip_plans (sip_id, customer_user_id, product_id, status, amount, frequency, next_debit, sip_data)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, userId, productId, status, amount, frequency, nextDebit, JSON.stringify(data)],
-      );
-    } else if (table === "admin_redemptions") {
+    if (table === "admin_redemptions") {
       persistedData = calculateRedemptionAmounts(data, product);
       const quantity = Number(persistedData.quantity);
       amount = Number(persistedData.amount);
@@ -896,9 +1406,9 @@ async function createRelatedRecord(
 
 async function updateTimelineRecord(
   response: Response,
-  table: "admin_orders" | "admin_sip_plans" | "admin_redemptions" | "admin_gifts",
-  idColumn: "order_id" | "sip_id" | "redemption_id" | "gift_id",
-  dataColumn: "order_data" | "sip_data" | "redemption_data" | "gift_data",
+  table: "admin_orders" | "admin_redemptions" | "admin_gifts",
+  idColumn: "order_id" | "redemption_id" | "gift_id",
+  dataColumn: "order_data" | "redemption_data" | "gift_data",
   label: string,
   id: string,
   nextStatus: unknown,
@@ -918,7 +1428,6 @@ async function updateTimelineRecord(
     if (currentStatus === status) { await connection.commit(); response.json({ success: true }); return; }
     const transitions: Record<string, Record<string, string[]>> = {
       admin_orders: { Pending: ["Processing", "Failed", "Cancelled"], Processing: ["Completed", "Failed", "Cancelled"] },
-      admin_sip_plans: { Active: ["Paused", "Cancelled", "Completed"], Paused: ["Active", "Cancelled"] },
       admin_redemptions: { Pending: ["Processing", "Rejected"], Processing: ["Shipped", "Completed", "Rejected"], Shipped: ["Delivered"] },
       admin_gifts: { Scheduled: ["Cancelled"], Delivered: ["Cancelled"], Redeemed: [], Expired: [], Cancelled: [] },
     };

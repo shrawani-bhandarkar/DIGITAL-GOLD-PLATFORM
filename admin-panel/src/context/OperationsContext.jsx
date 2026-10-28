@@ -84,21 +84,38 @@ export function OperationsProvider() {
       recordAudit({ action: `Updated order to ${status}`, category: 'Orders', target: id, detail: 'Order status persisted.' });
       return true;
     },
-    addSip: async (sip) => {
-      const saved = await persist('/api/admin/console/sips', { method: 'POST', body: sip });
+    addSip: async (plan) => {
+      const saved = await persist('/api/admin/console/sips', { method: 'POST', body: plan });
       if (!saved) return false;
-      setSips((items) => [sip, ...items]);
-      recordAudit({ action: 'Created SIP plan', category: 'SIPs', target: sip.id, detail: 'SIP plan persisted; no installment debit was initiated.' });
-      return true;
+      setSips((items) => [saved.sip, ...items]);
+      recordAudit({ action: 'Created SIP plan', category: 'SIPs', target: saved.sip.id, detail: 'SIP plan and monthly installment schedule persisted in MySQL.' });
+      return saved.sip;
     },
     updateSip: async (id, status) => {
       const saved = await persist(`/api/admin/console/sips/${encodeURIComponent(id)}`, { method: 'PATCH', body: { status } });
-      if (!saved) return false;
-      setSips((items) => items.map((item) => item.id === id
-        ? { ...item, status, timeline: addTimelineEntry(item, `Plan ${status.toLowerCase()}`) }
-        : item));
+      if (!saved?.sip) return false;
+      setSips((items) => items.map((item) => item.id === id ? saved.sip : item));
       recordAudit({ action: `Updated SIP to ${status}`, category: 'SIPs', target: id, detail: 'SIP status persisted.' });
-      return true;
+      return saved.sip;
+    },
+    fetchSipDetails: async (id) => {
+      const saved = await persist(`/api/admin/console/sips/${encodeURIComponent(id)}`, {});
+      return saved?.sip ? saved : null;
+    },
+    updateSipInstallment: async (id, action) => {
+      const saved = await persist(`/api/admin/console/sips/${encodeURIComponent(id)}/installments`, {
+        method: 'POST',
+        body: { action },
+      });
+      if (!saved?.sip || !Array.isArray(saved.installments)) return null;
+      setSips((items) => items.map((item) => item.id === id ? saved.sip : item));
+      recordAudit({
+        action: action === 'paid' ? 'Recorded SIP installment payment' : 'Skipped SIP installment',
+        category: 'SIPs',
+        target: id,
+        detail: action === 'paid' ? 'Monthly installment marked paid.' : 'Monthly installment marked skipped and schedule extended.',
+      });
+      return saved;
     },
     updateRedemption: async (id, status) => {
       const saved = await persist(`/api/admin/console/redemptions/${encodeURIComponent(id)}`, { method: 'PATCH', body: { status } });

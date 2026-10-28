@@ -48,6 +48,8 @@ const tabs = [
   { id: 'account', label: 'Account', icon: 'person' },
 ];
 
+const KYC_RESTRICTION_MESSAGE = 'Complete KYC approval to start buying gold or investing in SIP.';
+
 const actions = [
   { id: 'buy', title: 'Buy', detail: 'Buy gold, silver or platinum', icon: 'shopping-bag' },
   { id: 'sell', title: 'Sell', detail: 'Sell your eligible metal holdings', icon: 'account-balance-wallet' },
@@ -375,12 +377,12 @@ function sortActivitiesByDate(items) {
     .map(({ item }) => item);
 }
 
-function ExploreActionCard({ action, onPress, unavailable, disabled = false, width }) {
+function ExploreActionCard({ action, onPress, unavailable, disabled = false, disabledReason, width }) {
   const tone = actionColors[action.id];
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${action.title}: ${disabled ? 'unavailable until customer transactions are connected' : unavailable ? 'no demo holdings available; tap to view details' : action.detail}`}
+      accessibilityLabel={`${action.title}: ${disabled ? disabledReason || 'unavailable until customer transactions are connected' : unavailable ? 'no demo holdings available; tap to view details' : action.detail}`}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
@@ -404,7 +406,7 @@ function ExploreActionCard({ action, onPress, unavailable, disabled = false, wid
       <View style={styles.actionCardFooter}>
         <View style={styles.actionCardCopy}>
           <Text style={styles.actionDetail} numberOfLines={2}>
-            {disabled ? 'Unavailable in backend mode' : unavailable ? 'No demo holdings yet · tap for details' : action.detail}
+            {disabled ? disabledReason || 'Unavailable in backend mode' : unavailable ? 'No demo holdings yet · tap for details' : action.detail}
           </Text>
         </View>
         <View style={styles.actionArrow}>
@@ -444,6 +446,7 @@ function PortfolioCard({ value, loading = false, empty = false }) {
 
 function HomeScreen({
   name,
+  kycApproved,
   onOpenAction,
   onSupport,
   onSelectTab,
@@ -519,8 +522,14 @@ function HomeScreen({
             onBuy={(draft) => onQuickBuy(draft)}
             purchaseAvailable={apiConfig.mode === 'demo'}
             backendMode={apiConfig.mode === 'backend'}
+            kycApproved={kycApproved}
           />
         </View>
+      ) : null}
+      {!kycApproved ? (
+        <Notice type="warning" style={styles.sectionNotice}>
+          {KYC_RESTRICTION_MESSAGE}
+        </Notice>
       ) : null}
       <SectionTitle title="Explore DigiGold" />
       <Text style={styles.exploreSectionDescription}>
@@ -532,15 +541,21 @@ function HomeScreen({
         </Notice>
       ) : null}
       <View style={[styles.actionsGrid, { columnGap, rowGap: 10 }]}>
-        {actions.map((action) => (
-          <ExploreActionCard
-            key={action.id}
-            action={action}
-            width={actionWidth}
-            disabled={apiConfig.mode === 'backend' && action.id !== 'portfolio'}
-            onPress={() => onOpenAction(action.id)}
-          />
-        ))}
+        {actions.map((action) => {
+          const requiresApprovedKyc = action.id === 'buy' || action.id === 'sip';
+          const disabledForKyc = requiresApprovedKyc && !kycApproved;
+          const disabledForBackend = apiConfig.mode === 'backend' && action.id !== 'portfolio';
+          return (
+            <ExploreActionCard
+              key={action.id}
+              action={action}
+              width={actionWidth}
+              disabled={disabledForKyc || disabledForBackend}
+              disabledReason={disabledForKyc ? KYC_RESTRICTION_MESSAGE : undefined}
+              onPress={() => onOpenAction(action.id)}
+            />
+          );
+        })}
       </View>
 
       <RecentActivity
@@ -759,6 +774,7 @@ function QuickBuyCalculator({
   onBuy,
   purchaseAvailable,
   backendMode,
+  kycApproved,
 }) {
   const [mode, setMode] = useState('amount');
   const stateCode = DEFAULT_BILLING_STATE_CODE;
@@ -774,6 +790,9 @@ function QuickBuyCalculator({
   const quoteSequence = useRef(0);
   const idempotencyKey = useRef('');
   const value = valuesByMode[mode];
+  useEffect(() => {
+    if (kycApproved) setPurchaseError('');
+  }, [kycApproved]);
   const selectedRate = rates.find((rate) => rate.id === selectedMetalId);
   const rateAvailable = Number.isFinite(selectedRate?.ratePerGram) && selectedRate.ratePerGram > 0;
   let estimate = null;
@@ -829,6 +848,10 @@ function QuickBuyCalculator({
   const submit = async () => {
     if (submitting || quoteLoading) return;
     setPurchaseError('');
+    if (!kycApproved) {
+      setPurchaseError(KYC_RESTRICTION_MESSAGE);
+      return;
+    }
     if (!rateAvailable) {
       setValidationError('A valid rate is not available for this metal.');
       return;
@@ -890,6 +913,10 @@ function QuickBuyCalculator({
   };
   const confirmPurchase = async () => {
     if (submitting || !quote) return;
+    if (!kycApproved) {
+      setPurchaseError(KYC_RESTRICTION_MESSAGE);
+      return;
+    }
     if (!idempotencyKey.current) {
       idempotencyKey.current = `quickbuy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
     }
@@ -1079,21 +1106,25 @@ function QuickBuyCalculator({
               value={formatINR(backendMode ? quote.metalValue : estimate.metalValue)}
             />
             <SummaryRow compact
-              label="Making charges"
+              label={backendMode && quote.makingChargeType === 'percentage'
+                ? `Making charges (${Number(quote.makingChargeValue).toFixed(2)}% of metal value)`
+                : 'Making charges'}
               value={backendMode
                 ? quote.makingChargeConfigured
                   ? formatINR(quote.makingCharges)
                   : 'Not configured'
                 : 'Not configured'}
             />
-            <SummaryRow compact
-              label="Taxes"
-              value={!backendMode
-                ? 'Not configured'
-                : quote.taxJurisdiction === 'intra-state'
-                  ? `${formatINR(quote.taxBreakdown.total)} (CGST ${formatINR(quote.taxBreakdown.cgst)} + SGST ${formatINR(quote.taxBreakdown.sgst)})`
-                  : `${formatINR(quote.taxBreakdown.total)} (IGST ${formatINR(quote.taxBreakdown.igst)})`}
-            />
+            {!backendMode ? (
+              <SummaryRow compact label="Taxes" value="Not configured" />
+            ) : quote.taxJurisdiction === 'intra-state' ? (
+              <>
+                <SummaryRow compact label="CGST" value={formatINR(quote.taxBreakdown.cgst)} />
+                <SummaryRow compact label="SGST" value={formatINR(quote.taxBreakdown.sgst)} />
+              </>
+            ) : (
+              <SummaryRow compact label="IGST" value={formatINR(quote.taxBreakdown.igst)} />
+            )}
             <View style={styles.quickBuyTotal}>
               <SummaryRow compact
                 label={backendMode ? 'Estimated payable' : 'Estimated payable · configured charges excluded'}
@@ -1114,6 +1145,7 @@ function QuickBuyCalculator({
         </Notice>
       ) : null}
       {purchaseError ? <Notice type="error" style={styles.quickBuyNotice}>{purchaseError}</Notice> : null}
+      {!kycApproved ? <Notice type="warning" style={styles.quickBuyNotice}>{KYC_RESTRICTION_MESSAGE}</Notice> : null}
       {purchaseResult ? (
         <Notice type="warning" style={styles.quickBuyNotice}>
           Order {purchaseResult.order.id} is {purchaseResult.order.status}. Payment is {purchaseResult.payment.status}; no payment was collected because a gateway is not configured.
@@ -1128,7 +1160,7 @@ function QuickBuyCalculator({
             title={submitting ? 'Submitting order…' : purchaseError ? 'Retry order submission' : 'Confirm & place order'}
             onPress={confirmPurchase}
             loading={submitting}
-            disabled={submitting}
+            disabled={submitting || !kycApproved}
             style={styles.formButton}
           />
           {!submitting && !purchaseError ? (
@@ -1140,7 +1172,7 @@ function QuickBuyCalculator({
         title="Buy Now"
         onPress={submit}
         loading={submitting}
-        disabled={submitting || reviewing || ratesLoading || !rateAvailable || (backendMode && quoteLoading)}
+        disabled={!kycApproved || submitting || reviewing || ratesLoading || !rateAvailable || (backendMode && quoteLoading)}
         style={styles.formButton}
       />
       <Text style={styles.calculationNote}>
@@ -1154,10 +1186,11 @@ function QuickBuyCalculator({
   );
 }
 
-function MetalDetailsScreen({ rate, onBuy }) {
+function MetalDetailsScreen({ rate, onBuy, kycApproved }) {
   return (
     <>
       <MetalRateCard rate={rate} />
+      {!kycApproved ? <Notice type="warning" style={styles.detailNotice}>{KYC_RESTRICTION_MESSAGE}</Notice> : null}
       {apiConfig.mode === 'demo' ? (
         <Notice type="warning" style={styles.detailNotice}>
           Illustrative demo rate only. This is not a live market feed or purchase quote.
@@ -1178,6 +1211,7 @@ function ActionScreen({
   portfolio,
   initialOrder,
   onReview,
+  kycApproved,
 }) {
   const [metal, setMetal] = useState(
     action === 'gift' ? 'gold' : initialOrder?.metal || 'gold',
@@ -1231,6 +1265,7 @@ function ActionScreen({
       ? numericValue * rate
       : buyEstimate?.totalEstimate || 0;
   const isReviewDisabled = (() => {
+    if ((action === 'buy' || action === 'sip') && !kycApproved) return true;
     if (!Number.isFinite(numericValue) || numericValue <= 0) return true;
     if (!Number.isFinite(amount) || amount <= 0 || Number(quantity.toFixed(6)) <= 0) return true;
     if (action === 'buy' && !buyEstimate) return true;
@@ -1260,6 +1295,10 @@ function ActionScreen({
 
   const review = () => {
     setError('');
+    if ((action === 'buy' || action === 'sip') && !kycApproved) {
+      setError(KYC_RESTRICTION_MESSAGE);
+      return;
+    }
     if (!Number.isFinite(numericValue) || numericValue <= 0) {
       setError('Enter an amount or quantity greater than zero.');
       return;
@@ -1327,6 +1366,9 @@ function ActionScreen({
           </Notice>
         </>
       )}
+      {(action === 'buy' || action === 'sip') && !kycApproved ? (
+        <Notice type="warning" style={styles.sectionNotice}>{KYC_RESTRICTION_MESSAGE}</Notice>
+      ) : null}
 
       {action === 'buy' || action === 'sell' || action === 'redeem' ? (
         <Card style={styles.formCard}>
@@ -2081,6 +2123,7 @@ export default function App() {
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [selectedRate, setSelectedRate] = useState(demoRates[0]);
   const [profileSection, setProfileSection] = useState('account');
+  const kycApproved = customerProfile.data?.kycStatus === 'APPROVED';
   const confirmationStarted = useRef(false);
   const scrollViewRef = useRef(null);
   const quickBuyOffset = useRef(0);
@@ -2113,22 +2156,53 @@ export default function App() {
   }, []);
 
   const loadCustomerProfile = useCallback(async () => {
-    if (apiConfig.mode !== 'backend') return;
+    if (apiConfig.mode !== 'backend') return null;
     setCustomerProfile((current) => ({ ...current, loading: true, error: '' }));
     try {
       const result = await fetchProfile();
-      if (!result?.profile || typeof result.profile !== 'object') {
-        throw new Error('The service did not return registered account details.');
+      if (!result?.profile || typeof result.profile !== 'object'
+        || !['PENDING', 'APPROVED', 'REJECTED'].includes(result.profile.kycStatus)) {
+        throw new Error('The service did not return valid registered account and KYC status.');
       }
       setCustomerProfile({ data: result.profile, loading: false, error: '' });
+      return result.profile;
     } catch (profileError) {
-      setCustomerProfile((current) => ({
-        ...current,
+      setCustomerProfile({
+        data: null,
         loading: false,
         error: profileError.message || 'Could not load registered account details.',
-      }));
+      });
+      return null;
     }
   }, []);
+
+  useEffect(() => {
+    if (screen !== 'app' || apiConfig.mode !== 'backend') return undefined;
+    let active = true;
+    const refreshKycStatus = async () => {
+      try {
+        const result = await fetchProfile();
+        if (!result?.profile || !['PENDING', 'APPROVED', 'REJECTED'].includes(result.profile.kycStatus)) {
+          throw new Error('The service did not return a valid KYC status.');
+        }
+        if (active) setCustomerProfile({ data: result.profile, loading: false, error: '' });
+      } catch (profileError) {
+        if (active) {
+          setCustomerProfile({
+            data: null,
+            loading: false,
+            error: profileError.message || 'Could not refresh KYC status.',
+          });
+        }
+      }
+    };
+    void refreshKycStatus();
+    const interval = setInterval(refreshKycStatus, 15000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [screen]);
 
   useEffect(() => {
     if (screen !== 'profileDetail' || profileSection !== 'account' || apiConfig.mode !== 'backend') return undefined;
@@ -2351,6 +2425,10 @@ export default function App() {
       setScreen('app');
       return;
     }
+    if ((nextAction === 'buy' || nextAction === 'sip') && !kycApproved) {
+      Alert.alert('KYC approval required', KYC_RESTRICTION_MESSAGE);
+      return;
+    }
     confirmationStarted.current = false;
     setAction(nextAction);
     setActionDraft(draft);
@@ -2360,6 +2438,11 @@ export default function App() {
 
   const confirmDemoAction = () => {
     if (confirmationStarted.current || !reviewOrder) return;
+    if ((reviewOrder.action === 'buy' || reviewOrder.action === 'sip') && !kycApproved) {
+      confirmationStarted.current = false;
+      Alert.alert('KYC approval required', KYC_RESTRICTION_MESSAGE);
+      return;
+    }
     confirmationStarted.current = true;
 
     const now = new Date();
@@ -2493,6 +2576,7 @@ export default function App() {
             {tab === 'home' ? (
               <HomeScreen
                 name={customerName}
+                kycApproved={kycApproved}
                 onOpenAction={openAction}
                 onSupport={onOpenHelp}
                 onSelectTab={setTab}
@@ -2515,6 +2599,7 @@ export default function App() {
                 activitiesError={apiConfig.mode === 'backend' ? backendActivities.error : ''}
                 onRetryActivities={retryBackendData}
                 onQuickBuy={({ metalId, mode, value, stateCode, quoteToken, idempotencyKey: requestKey }) => {
+                  if (!kycApproved) return Promise.reject(new Error(KYC_RESTRICTION_MESSAGE));
                   if (apiConfig.mode === 'demo') {
                     openAction('buy', { metal: metalId, mode, value });
                     return Promise.resolve(null);
@@ -2566,7 +2651,8 @@ export default function App() {
             <DigiGoldHeader title={headerTitle} onNotifications={onOpenNotifications} onSupport={onOpenHelp} />
             <MetalDetailsScreen
               rate={selectedRate}
-              onBuy={apiConfig.mode === 'demo'
+              kycApproved={kycApproved}
+              onBuy={apiConfig.mode === 'demo' && kycApproved
                 ? (metalId) => openAction('buy', { metal: metalId, mode: 'amount', value: '' })
                 : undefined}
             />
@@ -2603,6 +2689,7 @@ export default function App() {
               <ActionScreen
                 action={action}
                 portfolio={demoHoldings}
+                kycApproved={kycApproved}
                 initialOrder={reviewOrder || actionDraft}
                 onReview={(order) => { setReviewOrder(order); setScreen('review'); }}
               />

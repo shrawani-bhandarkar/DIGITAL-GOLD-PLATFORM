@@ -64,6 +64,21 @@ mysql -u root -p digital_gold_db < apps\api\src\modules\admin-console\schema.sql
 mysql -u root -p digital_gold_db < apps\api\src\modules\customer-auth\schema.sql
 ```
 
+Configure `KYC_ENCRYPTION_KEY` in `apps/api/.env` as 64 hexadecimal
+characters generated from 32 random bytes. Keep this key stable and backed up;
+it is required to decrypt KYC documents. For an existing database, apply
+`apps/api/src/modules/admin-console/migrations/006-customer-kyc-documents.sql`
+and then `apps/api/src/modules/admin-console/migrations/007-admin-managed-customer-kyc.sql`.
+Authorized Admins and Super Admins enter Aadhaar or PAN details and update
+approval status in Customer Details; customers can view status only in the
+mobile app.
+
+For an existing database whose making-charge table still has the
+`charge_per_purchase` column, apply
+`apps\api\src\modules\admin-console\migrations\005-making-charge-type.sql`
+after the admin-console schema. Existing values remain fixed rupee charges;
+new percentage settings are stored with their selected type and value.
+
 For an existing database, apply the customer identity and ID-generation
 migration after the admin-console schema:
 
@@ -81,6 +96,22 @@ to support exact amount-based Silver and Platinum quotes:
 
 ```powershell
 mysql -u root -p digital_gold_db < apps\api\src\modules\admin-console\migrations\003-precise-purchase-quantities.sql
+```
+
+For existing installations, apply the SIP plan and installment migration after
+the admin-console schema. The Admin and Super Admin SIP Management page then
+creates customer plans and monthly installment schedules in MySQL; skipped
+installments are retained in the schedule and extend the plan maturity date.
+Apply the following migration after 008 to allow plans to be created before
+they are assigned to a customer. Apply migration 010 afterward to persist
+separate shop-owner contribution and customer-payment amounts, durations, and
+totals. The customer payment schedule starts after the shop-owner contribution
+period; skipping a customer installment extends maturity by one month.
+
+```powershell
+mysql -u root -p digital_gold_db < apps\api\src\modules\admin-console\migrations\008-customer-sip-installments.sql
+mysql -u root -p digital_gold_db < apps\api\src\modules\admin-console\migrations\009-unassigned-customer-sip-plans.sql
+mysql -u root -p digital_gold_db < apps\api\src\modules\admin-console\migrations\010-sip-contribution-details.sql
 ```
 
 The admin-console schema includes the daily metal-price history table used by

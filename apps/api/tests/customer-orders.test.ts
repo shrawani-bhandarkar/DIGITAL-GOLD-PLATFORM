@@ -6,11 +6,12 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
   process.env.JWT_SECRET ??= "customer-orders-test-secret-with-at-least-32-bytes";
   process.env.DB_USER ??= "customer-orders-test";
   process.env.DB_NAME ??= "customer_orders_test";
-  const [{ default: express }, { default: database }, { default: customerOrdersRouter }, tokens] =
+  const [{ default: express }, { default: database }, { default: customerOrdersRouter }, { default: customerActivityRouter }, tokens] =
     await Promise.all([
       import("express"),
       import("../src/config/database"),
       import("../src/modules/customer-orders/routes"),
+      import("../src/modules/customer-activity/routes"),
       import("../src/modules/customer-auth/tokens"),
     ]);
 
@@ -23,7 +24,10 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
   let loggedWriteError = false;
   let taxSettingsConfigured = true;
   let chargePerPurchase = "25.00";
+  let chargeType: "fixed" | "percentage" = "fixed";
   let makingChargeEnabled = true;
+  let customerKycStatus: "PENDING" | "VERIFIED" | "REJECTED" = "PENDING";
+  let customerSessionKycStatus: "PENDING" | "VERIFIED" | "REJECTED" = "PENDING";
   let rateUpdatedAt = "2026-04-12 09:00:00";
   let activeMetal: "Gold" | "Silver" | "Platinum" = "Gold";
   const ratesPerGram = { Gold: "12500.0000", Silver: "180.0000", Platinum: "4200.0000" };
@@ -65,7 +69,7 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
         }], []];
       }
       if (sql.includes("FROM admin_metal_making_charges")) {
-        return [[{ charge_per_purchase: chargePerPurchase, enabled: Number(makingChargeEnabled), updated_at: "2026-04-12 08:30:00" }], []];
+        return [[{ charge_value: chargePerPurchase, charge_type: chargeType, enabled: Number(makingChargeEnabled), updated_at: "2026-04-12 08:30:00" }], []];
       }
       if (sql.includes("FROM admin_metal_gst_settings")) {
         return [taxSettingsConfigured ? [{
@@ -77,7 +81,7 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
         }] : [], []];
       }
       if (sql.includes("FROM users WHERE user_id = ? AND status = 'ACTIVE'")) {
-        return [[{ user_id: 7 }], []];
+        return [[{ user_id: 7, verification_status: customerKycStatus }], []];
       }
       if (sql.includes("FROM admin_orders") && sql.includes("JSON_EXTRACT")) {
         const found = orders.find((order) => order.data.idempotencyKey === values[1]);
@@ -116,7 +120,12 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
     configurable: true,
     value: async (sql: string) => {
       if (sql.includes("FROM customer_auth_sessions")) {
-        return [[{ user_id: 7, full_name: "Test Customer", mobile: "+919876543210" }], []];
+        return [[{
+          user_id: 7,
+          full_name: "Test Customer",
+          mobile: "+919876543210",
+          verification_status: customerSessionKycStatus,
+        }], []];
       }
       throw new Error(`Unexpected database query: ${sql}`);
     },
@@ -136,6 +145,7 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
   const app = express();
   app.use(express.json());
   app.use("/api/customer/orders", customerOrdersRouter);
+  app.use("/api/customer", customerActivityRouter);
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -189,6 +199,8 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
       quantityGrams: 0.08,
       metalValue: 1000,
       makingChargePerPurchase: 25,
+      makingChargeValue: 25,
+      makingChargeType: "fixed",
       makingChargeEnabled: true,
       makingChargeConfigured: true,
       makingCharges: 25,
@@ -313,6 +325,22 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
     assert.equal(quantityQuote.taxBreakdown.sgst, 187.88);
     assert.equal(quantityQuote.totalAmount, 12900.76);
 
+    chargeType = "percentage";
+    chargePerPurchase = "2.50";
+    const percentageQuoteResponse = await fetch(`${apiBase}/api/customer/orders/purchase/quote`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ metalId: "gold", mode: "grams", value: "1.000" }),
+    });
+    assert.equal(percentageQuoteResponse.status, 200);
+    const percentageQuote = (await percentageQuoteResponse.json()).quote;
+    assert.equal(percentageQuote.makingChargeType, "percentage");
+    assert.equal(percentageQuote.makingChargeValue, 2.5);
+    assert.equal(percentageQuote.makingCharges, 312.5);
+    assert.equal(percentageQuote.purchaseSubtotal, 12812.5);
+    assert.equal(percentageQuote.taxBreakdown.taxableAmount, 12812.5);
+    assert.equal(percentageQuote.totalAmount, 13196.88);
+    chargeType = "fixed";
     chargePerPurchase = "50.00";
     const updatedAmountQuoteResponse = await fetch(`${apiBase}/api/customer/orders/purchase/quote`, {
       method: "POST",
@@ -404,6 +432,48 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
     assert.equal(invalidQuantityResponse.status, 400);
 
     const purchaseWithQuote = { ...purchase, quoteToken: quote.quoteToken };
+    const pendingPurchaseResponse = await fetch(`${apiBase}/api/customer/orders/purchase`, {
+      method: "POST",
+      headers: { ...headers, "Idempotency-Key": key },
+      body: JSON.stringify(purchaseWithQuote),
+    });
+    assert.equal(pendingPurchaseResponse.status, 403);
+    assert.deepEqual(await pendingPurchaseResponse.json(), {
+      code: "KYC_APPROVAL_REQUIRED",
+      message: "Complete KYC approval to start buying gold or investing in SIP.",
+    });
+    assert.equal(orders.length, 0);
+
+    const pendingSipResponse = await fetch(`${apiBase}/api/customer/sips`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ metalId: "gold", amount: "1000", frequency: "monthly" }),
+    });
+    assert.equal(pendingSipResponse.status, 403);
+    customerSessionKycStatus = "REJECTED";
+    const rejectedSipResponse = await fetch(`${apiBase}/api/customer/sips`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ metalId: "gold", amount: "1000", frequency: "monthly" }),
+    });
+    assert.equal(rejectedSipResponse.status, 403);
+    customerSessionKycStatus = "VERIFIED";
+    const approvedSipResponse = await fetch(`${apiBase}/api/customer/sips`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ metalId: "gold", amount: "1000", frequency: "monthly" }),
+    });
+    assert.equal(approvedSipResponse.status, 501);
+
+    customerKycStatus = "REJECTED";
+    const changedStatusDuringPurchase = await fetch(`${apiBase}/api/customer/orders/purchase`, {
+      method: "POST",
+      headers: { ...headers, "Idempotency-Key": key },
+      body: JSON.stringify(purchaseWithQuote),
+    });
+    assert.equal(changedStatusDuringPurchase.status, 403);
+    customerKycStatus = "VERIFIED";
+
     rateUpdatedAt = "2026-04-12 09:01:00";
     const staleQuoteResponse = await fetch(`${apiBase}/api/customer/orders/purchase`, {
       method: "POST",

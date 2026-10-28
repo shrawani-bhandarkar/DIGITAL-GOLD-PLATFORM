@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { apiRequest } from '../services/apiClient.js';
 import { useAdmin } from './AdminContext.jsx';
@@ -46,7 +46,7 @@ export function ManagementProvider() {
     setRateRequests(consoleState.rateRequests ?? []);
     const configuredCharges = consoleState.metalMakingCharges ?? [];
     setMetalMakingCharges(SUPPORTED_METALS.map((metal) => configuredCharges.find((item) => item.metal === metal)
-      ?? { metal, chargePerPurchase: 0, enabled: false, updatedAt: 'Not configured' }));
+      ?? { metal, chargeType: 'fixed', chargeValue: 0, enabled: false, updatedAt: 'Not configured' }));
     setMetalTaxSettings(consoleState.metalTaxSettings ?? null);
     setLedgerEntries(consoleState.ledgerEntries ?? []);
   }, [consoleState]);
@@ -62,25 +62,33 @@ export function ManagementProvider() {
     }
   }
 
-  async function updateMetalMakingCharge(metal, chargePerPurchase, enabled) {
+  async function updateMetalMakingCharge(metal, chargeType, chargeValue, enabled) {
     if (!hasPermission('products')) {
       return { success: false, message: 'You do not have permission to configure metal making charges.' };
     }
     if (!SUPPORTED_METALS.includes(metal)) {
       return { success: false, message: 'Choose a supported metal.' };
     }
-    if (!Number.isFinite(chargePerPurchase) || chargePerPurchase < 0 || !Number.isSafeInteger(Math.round(chargePerPurchase * 100)) || typeof enabled !== 'boolean') {
-      return { success: false, message: 'Fixed making charge per purchase must be a non-negative amount and have an explicit status.' };
+    if (
+      !['fixed', 'percentage'].includes(chargeType)
+      || !Number.isFinite(chargeValue)
+      || chargeValue < 0
+      || (chargeType === 'percentage' && chargeValue > 100)
+      || !Number.isSafeInteger(Math.round(chargeValue * 100))
+      || typeof enabled !== 'boolean'
+    ) {
+      return { success: false, message: 'Making charge must be a valid non-negative rupee amount or percentage, with an explicit status.' };
     }
     try {
       const result = await apiRequest(`/api/admin/console/making-charges/${encodeURIComponent(metal)}`, {
         method: 'PUT',
-        body: { chargePerPurchase: chargePerPurchase.toFixed(2), enabled },
+        body: { chargeType, chargeValue: chargeValue.toFixed(2), enabled },
       });
       if (
         result?.success !== true
         || result.makingCharge?.metal !== metal
-        || result.makingCharge.chargePerPurchase !== chargePerPurchase
+        || result.makingCharge.chargeType !== chargeType
+        || result.makingCharge.chargeValue !== chargeValue
         || result.makingCharge.enabled !== enabled
       ) {
         throw new Error('The database did not confirm the saved making charge.');
@@ -95,7 +103,7 @@ export function ManagementProvider() {
         action: 'Updated metal making charge',
         category: 'Products',
         target: metal,
-        detail: `${metal} making charge saved as ${enabled ? 'enabled' : 'disabled'} in MySQL.`,
+        detail: `${metal} ${chargeType} making charge saved as ${enabled ? 'enabled' : 'disabled'} in MySQL.`,
       });
       return { success: true };
     } catch (error) {
@@ -104,6 +112,44 @@ export function ManagementProvider() {
       return { success: false, message };
     }
   }
+
+  const fetchCustomerKyc = useCallback(async (customerId) => {
+    try {
+      const result = await apiRequest(`/api/admin/console/customers/${encodeURIComponent(customerId)}/kyc`);
+      if (!Array.isArray(result?.documents)) throw new Error('API returned invalid KYC document data.');
+      setPersistenceError('');
+      return result.documents;
+    } catch (error) {
+      setPersistenceError(error.message);
+      throw error;
+    }
+  }, [setPersistenceError]);
+
+  const reviewCustomerKyc = useCallback(async (customerId, documentType, documentNumber, status) => {
+    try {
+      const result = await apiRequest(`/api/admin/console/customers/${encodeURIComponent(customerId)}/kyc`, {
+        method: 'PATCH',
+        body: { documentType, documentNumber, status },
+      });
+      if (result?.success !== true || result.documentType !== documentType || result.documentStatus !== status) {
+        throw new Error('The database did not confirm the KYC review.');
+      }
+      setCustomers((items) => items.map((item) => item.id === customerId
+        ? { ...item, kycStatus: result.kycStatus }
+        : item));
+      setPersistenceError('');
+      recordAudit({
+        action: `${status === 'Approved' ? 'Approved' : status === 'Rejected' ? 'Rejected' : 'Updated'} customer KYC`,
+        category: 'Customers',
+        target: customerId,
+        detail: `${documentType === 'aadhaar' ? 'Aadhaar Card' : 'PAN Card'} KYC details ${status.toLowerCase()}.`,
+      });
+      return result;
+    } catch (error) {
+      setPersistenceError(error.message);
+      throw error;
+    }
+  }, [recordAudit, setPersistenceError]);
 
   async function updateMetalTaxSettings(settings) {
     if (!hasPermission('products')) {
@@ -142,6 +188,8 @@ export function ManagementProvider() {
     metalMakingCharges,
     metalTaxSettings,
     ledgerEntries,
+    fetchCustomerKyc,
+    reviewCustomerKyc,
     updateMetalMakingCharge,
     updateMetalTaxSettings,
     addCustomer: async (customer) => {
@@ -210,7 +258,7 @@ export function ManagementProvider() {
       }
       return true;
     },
-  }), [customers, customersLoading, products, rateRequests, metalMakingCharges, ledgerEntries, recordAudit, activeRoleId, setPersistenceError]);
+  }), [customers, customersLoading, products, rateRequests, metalMakingCharges, ledgerEntries, recordAudit, activeRoleId, setPersistenceError, fetchCustomerKyc, reviewCustomerKyc]);
 
   return <ManagementContext.Provider value={value}><Outlet /></ManagementContext.Provider>;
 }

@@ -52,6 +52,7 @@ export function calculateOrderAmounts(
   product: Record<string, unknown>,
   makingChargePerPurchase: unknown = "0",
   makingChargeEnabled = false,
+  makingChargeType: "fixed" | "percentage" = "fixed",
 ): Record<string, unknown> {
   const type = order.type;
   const quantityMilliGrams = parseQuantityMilliGrams(order.quantity);
@@ -65,7 +66,12 @@ export function calculateOrderAmounts(
     const minOrder = parseMoneyPaise(product.minOrder, "Minimum order");
     const maxOrder = parseMoneyPaise(product.maxOrder, "Maximum order");
     if (baseAmountPaise < minOrder || baseAmountPaise > maxOrder) throw new Error("Purchase amount is outside this product's configured limits.");
-    const makingChargePaise = parseMoneyPaise(makingChargePerPurchase, "Fixed making charge per purchase");
+    const makingChargeValuePaise = parseMoneyPaise(makingChargePerPurchase, "Making charge");
+    if (makingChargeType !== "fixed" && makingChargeType !== "percentage") throw new Error("Choose a supported making charge type.");
+    if (makingChargeType === "percentage" && makingChargeValuePaise > 10_000) throw new Error("Percentage making charge cannot exceed 100%.");
+    const makingChargePaise = makingChargeType === "percentage"
+      ? chargeFor(baseAmountPaise, makingChargeValuePaise)
+      : makingChargeValuePaise;
     const making = makingChargeEnabled ? makingChargePaise : 0;
     const purchaseSubtotal = baseAmountPaise + making;
     safeInteger(purchaseSubtotal, "Purchase subtotal");
@@ -82,7 +88,9 @@ export function calculateOrderAmounts(
       taxes: amountInRupees(taxes),
       amount: amountInRupees(total),
       makingCharges: amountInRupees(making),
-      makingChargePerPurchase: makingChargePaise / 100,
+      makingChargePerPurchase: makingChargeValuePaise / 100,
+      makingChargeValue: makingChargeValuePaise / 100,
+      makingChargeType,
       makingChargeEnabled,
       purchaseSubtotal: amountInRupees(purchaseSubtotal),
     };

@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS admin_metal_making_charges (
   metal VARCHAR(32) NOT NULL,
-  charge_per_purchase DECIMAL(12,2) UNSIGNED NOT NULL,
+  charge_type ENUM('fixed', 'percentage') NOT NULL DEFAULT 'fixed',
+  charge_value DECIMAL(12,2) UNSIGNED NOT NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (metal)

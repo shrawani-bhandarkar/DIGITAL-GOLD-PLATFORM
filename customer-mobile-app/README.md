@@ -114,6 +114,22 @@ Orders reuse `admin_orders`, `admin_payments`, `admin_metal_products`,
 the dedicated `admin_metal_gst_settings` table. Apply
 `apps/api/src/modules/admin-console/migrations/001-create-metal-gst-settings.sql`
 to an existing database; it is additive and preserves existing charge data.
+For a database whose making-charge table still has the legacy
+`charge_per_purchase` column, also apply
+`apps/api/src/modules/admin-console/migrations/005-making-charge-type.sql`.
+Existing making-charge values remain fixed rupee amounts. Superadmins can
+choose fixed rupees or a percentage of metal value per metal; Quick Buy uses
+the selected type and value in its server-side quote.
+Customer KYC numbers are entered by authorized Admins or Super Admins; the
+customer app displays only the latest Pending, Approved, or Rejected status.
+Apply
+`apps/api/src/modules/admin-console/migrations/006-customer-kyc-documents.sql`
+and `apps/api/src/modules/admin-console/migrations/007-admin-managed-customer-kyc.sql`
+to existing databases and configure `KYC_ENCRYPTION_KEY` in the API environment
+as 64 hex characters generated from 32 random bytes. Keep the key stable and
+backed up; KYC numbers are encrypted at rest and full values are returned only
+to authenticated Admins with customer permission. The customer profile API
+returns the current KYC status for the mobile app.
 It initializes the requested 1.5% CGST, 1.5% SGST, and 3% IGST rates while
 leaving seller state unconfigured until an authorized Admin sets it. No live
 quote is enabled until the seller state is configured. An Admin can update
