@@ -24,6 +24,7 @@ export const createRedemptionQuote = (input) =>
   apiRequest(apiRoutes.redemptionQuote, { body: input });
 export const submitConfirmedRedemption = (input, idempotencyKey) =>
   apiRequest(apiRoutes.redemptionSubmit, { body: input, idempotencyKey });
+export const fetchSipSchemes = () => apiRequest(apiRoutes.sipSchemes, { cache: 'no-store' });
 export const fetchSips = (query) => apiRequest(apiRoutes.sips, { query });
 export const createSip = (input, idempotencyKey) =>
   apiRequest(apiRoutes.sipCreate, { body: input, idempotencyKey });

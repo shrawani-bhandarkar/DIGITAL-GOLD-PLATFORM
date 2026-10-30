@@ -605,6 +605,12 @@ a { color: inherit; text-decoration: none; }
 .order-action-copy svg { flex: 0 0 auto; color: #0d998c; }
 .order-action-button { margin: 13px 15px 15px; }
 .sip-detail-summary, .redemption-detail-summary, .gift-detail-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; padding: 11px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
+.sip-scheme-list { display: grid; gap: 10px; margin-top: 20px; }
+.sip-scheme-admin-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px; border: 1px solid #edf0f4; border-radius: 8px; }
+.sip-scheme-admin-row > div:first-child { display: grid; gap: 4px; }
+.sip-scheme-admin-row strong { color: #344054; font-size: 13px; }
+.sip-scheme-admin-row small { color: #8792a3; font-size: 10px; }
+.sip-scheme-admin-row .table-row-actions { align-items: center; }
 .sip-detail-summary > *, .redemption-detail-summary > div, .gift-detail-summary > div { display: grid; gap: 4px; }
 .sip-detail-summary strong, .redemption-detail-summary strong, .gift-detail-summary strong { color: #344054; font-size: 10px; }
 .sip-detail-summary > span, .redemption-detail-summary span, .gift-detail-summary span { color: #8792a3; font-size: 8px; }

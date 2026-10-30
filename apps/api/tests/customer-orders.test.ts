@@ -463,7 +463,8 @@ test("customer Quick Buy quotes and persists one pending order/payment per idemp
       headers,
       body: JSON.stringify({ metalId: "gold", amount: "1000", frequency: "monthly" }),
     });
-    assert.equal(approvedSipResponse.status, 501);
+    assert.equal(approvedSipResponse.status, 400);
+    assert.deepEqual(await approvedSipResponse.json(), { message: "Choose an active SIP scheme." });
 
     customerKycStatus = "REJECTED";
     const changedStatusDuringPurchase = await fetch(`${apiBase}/api/customer/orders/purchase`, {

@@ -13,6 +13,7 @@ export const apiRoutes = {
   sellSubmit: { method: 'POST', path: '/api/customer/orders/sell' },
   redemptionQuote: { method: 'POST', path: '/api/customer/redemptions/quote' },
   redemptionSubmit: { method: 'POST', path: '/api/customer/redemptions' },
+  sipSchemes: { method: 'GET', path: '/api/customer/sip-schemes' },
   sips: { method: 'GET', path: '/api/customer/sips' },
   sipCreate: { method: 'POST', path: '/api/customer/sips' },
   sipCancel: { method: 'POST', path: '/api/customer/sips/{sipId}/cancel' },

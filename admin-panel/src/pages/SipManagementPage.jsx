@@ -9,11 +9,13 @@ import StatusBadge from '../components/StatusBadge.jsx';
 import SimulatedBanner from '../components/SimulatedBanner.jsx';
 import { useManagement } from '../context/ManagementContext.jsx';
 import { useOperations } from '../context/OperationsContext.jsx';
+import { useAdmin } from '../context/AdminContext.jsx';
 import { formatCurrency } from '../utils/formatters.js';
 import { calculateSipSchedule, formatPaise, parseMoneyPaise } from '../utils/financial.js';
 import useDocumentTitle from '../hooks/useDocumentTitle.js';
 
 const PAGE_SIZE = 7;
+const SIP_METALS = ['Gold', 'Silver', 'Platinum'];
 
 function todayDate() {
   return new Date().toISOString().slice(0, 10);
@@ -31,8 +33,10 @@ function addMonths(date, months) {
 export default function SipManagementPage() {
   useDocumentTitle('SIP management');
   const { products } = useManagement();
+  const { activeRoleId } = useAdmin();
   const {
-    sips, addSip, updateSip, fetchSipDetails, updateSipInstallment,
+    sips, sipSchemes, addSip, updateSip, fetchSipDetails, updateSipInstallment,
+    createSipScheme, updateSipScheme,
   } = useOperations();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All statuses');
@@ -44,10 +48,25 @@ export default function SipManagementPage() {
   const [pendingAction, setPendingAction] = useState(null);
   const [formError, setFormError] = useState('');
   const [actionError, setActionError] = useState('');
+  const [schemeError, setSchemeError] = useState('');
+  const [schemeSaving, setSchemeSaving] = useState(false);
+  const [editingSchemeId, setEditingSchemeId] = useState('');
+  const [schemeDraft, setSchemeDraft] = useState({
+    name: '',
+    productId: '',
+    minimumAmount: '',
+    frequency: 'Monthly',
+    durationMonths: '12',
+    chargeType: 'fixed',
+    chargeValue: '0',
+    taxRatePercent: '0',
+    status: 'Active',
+  });
   const [contributionDurationMonths, setContributionDurationMonths] = useState('12');
   const [contributionAmountInput, setContributionAmountInput] = useState('');
   const [durationMonths, setDurationMonths] = useState('12');
   const [amountInput, setAmountInput] = useState('');
+  const [selectedSipMetal, setSelectedSipMetal] = useState('Gold');
   const [startDate, setStartDate] = useState(todayDate);
   const term = query.trim().toLowerCase();
   const filtered = useMemo(() => sips.filter((sip) => (
@@ -102,9 +121,12 @@ export default function SipManagementPage() {
   async function submitSip(event) {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-    const product = products.find((item) => item.id === data.productId && item.status === 'Active');
+    const product = products.find((item) => (
+      item.metal === data.metal
+      && String(item.status).trim().toUpperCase() === 'ACTIVE'
+    ));
     if (!product) {
-      setFormError('Select an active metal.');
+      setFormError(`No active ${data.metal} product is configured. Activate a product for this metal and try again.`);
       return;
     }
     try {
@@ -164,28 +186,125 @@ export default function SipManagementPage() {
     setPendingAction(null);
   }
 
+  function resetSchemeDraft() {
+    setEditingSchemeId('');
+    setSchemeError('');
+    setSchemeDraft({
+      name: '',
+      productId: products.find((product) => product.status === 'Active')?.id ?? '',
+      minimumAmount: '',
+      frequency: 'Monthly',
+      durationMonths: '12',
+      chargeType: 'fixed',
+      chargeValue: '0',
+      taxRatePercent: '0',
+      status: 'Active',
+    });
+  }
+
+  function editScheme(scheme) {
+    setEditingSchemeId(scheme.id);
+    setSchemeError('');
+    setSchemeDraft({
+      name: scheme.name,
+      productId: scheme.productId,
+      minimumAmount: String(scheme.minimumAmount),
+      frequency: scheme.frequency,
+      durationMonths: String(scheme.durationMonths),
+      chargeType: scheme.chargeType,
+      chargeValue: String(scheme.chargeValue),
+      taxRatePercent: String(scheme.taxRateBps / 100),
+      status: scheme.status,
+    });
+  }
+
+  async function submitScheme(event) {
+    event.preventDefault();
+    setSchemeError('');
+    const taxPercent = Number(schemeDraft.taxRatePercent);
+    const duration = Number(schemeDraft.durationMonths);
+    if (!Number.isFinite(taxPercent) || taxPercent < 0 || taxPercent > 100) {
+      setSchemeError('Tax rate must be between 0 and 100 percent.');
+      return;
+    }
+    if (!Number.isInteger(duration) || duration < 1 || duration > 60) {
+      setSchemeError('Choose a scheme duration between 1 and 60 months.');
+      return;
+    }
+    setSchemeSaving(true);
+    const payload = {
+      name: schemeDraft.name,
+      productId: schemeDraft.productId,
+      minimumAmount: schemeDraft.minimumAmount,
+      frequency: schemeDraft.frequency,
+      durationMonths: duration,
+      chargeType: schemeDraft.chargeType,
+      chargeValue: schemeDraft.chargeValue,
+      taxRateBps: Math.round(taxPercent * 100),
+      status: schemeDraft.status,
+    };
+    const saved = editingSchemeId
+      ? await updateSipScheme(editingSchemeId, payload)
+      : await createSipScheme(payload);
+    setSchemeSaving(false);
+    if (!saved) {
+      setSchemeError('Could not save this SIP scheme. Check the database connection and try again.');
+      return;
+    }
+    resetSchemeDraft();
+  }
+
   const columns = [
-    { key: 'id', label: 'Plan', render: (value, row) => <button className="inline-table-link" onClick={() => openDetails(row)}><strong>{value}</strong><small>Started {row.startDate}</small></button> },
+    { key: 'id', label: 'Plan', render: (value, row) => row.source === 'customer-scheme' ? <div className="management-secondary"><strong>{row.schemeName || value}</strong><small>Started {row.startDate}</small><small>{value}</small></div> : <button className="inline-table-link" onClick={() => openDetails(row)}><strong>{value}</strong><small>Started {row.startDate}</small></button> },
     { key: 'customer', label: 'Customer', render: (value, row) => <div className="management-secondary"><strong>{value || 'Unassigned'}</strong>{row.customerId ? <small>{row.customerId}</small> : null}</div> },
     { key: 'metal', label: 'Metal' },
-    { key: 'contributionDurationMonths', label: 'Shop owner months', render: (value) => `${value} months` },
+    { key: 'contributionDurationMonths', label: 'Shop owner months', render: (value, row) => row.source === 'customer-scheme' ? '—' : `${value} months` },
     { key: 'durationMonths', label: 'Customer payment months', render: (value) => `${value} months` },
-    { key: 'monthlyContribution', label: 'Shop owner monthly', align: 'right', render: (value) => formatCurrency(value) },
+    { key: 'monthlyContribution', label: 'Shop owner monthly', align: 'right', render: (value, row) => row.source === 'customer-scheme' ? '—' : formatCurrency(value) },
     { key: 'amount', label: 'Customer monthly payment', align: 'right', render: (value) => formatCurrency(value) },
-    { key: 'totalShopOwnerContribution', label: 'Owner contribution total', align: 'right', render: (value) => formatCurrency(value) },
+    { key: 'totalShopOwnerContribution', label: 'Owner contribution total', align: 'right', render: (value, row) => row.source === 'customer-scheme' ? '—' : formatCurrency(value) },
     { key: 'totalCustomerPayments', label: 'Customer payment total', align: 'right', render: (value) => formatCurrency(value) },
     { key: 'totalInvestment', label: 'Total investment', align: 'right', render: (value) => formatCurrency(value) },
     { key: 'paidCount', label: 'Paid / pending / skipped', render: (_, row) => `${row.paidCount} / ${row.pendingCount} / ${row.skippedCount}` },
     { key: 'nextDebit', label: 'Next due date', render: (value) => value || '—' },
     { key: 'maturityDate', label: 'Maturity date' },
     { key: 'status', label: 'Status', render: (value) => <StatusBadge status={value} /> },
-    { key: 'actions', label: 'Actions', render: (_, row) => row.status === 'Active' || row.status === 'Paused' ? <div className="table-row-actions"><button className="text-action" onClick={() => setPendingAction({ type: 'status', sip: row, status: row.status === 'Active' ? 'Paused' : 'Active' })}>{row.status === 'Active' ? 'Pause' : 'Resume'}</button><button className="text-action text-action-danger" onClick={() => setPendingAction({ type: 'status', sip: row, status: 'Cancelled' })}>Cancel</button></div> : <button className="text-action" onClick={() => openDetails(row)}>Details</button> },
+    { key: 'actions', label: 'Actions', render: (_, row) => row.source === 'customer-scheme' ? <span>Customer enrolled</span> : row.status === 'Active' || row.status === 'Paused' ? <div className="table-row-actions"><button className="text-action" onClick={() => setPendingAction({ type: 'status', sip: row, status: row.status === 'Active' ? 'Paused' : 'Active' })}>{row.status === 'Active' ? 'Pause' : 'Resume'}</button><button className="text-action text-action-danger" onClick={() => setPendingAction({ type: 'status', sip: row, status: 'Cancelled' })}>Cancel</button></div> : <button className="text-action" onClick={() => openDetails(row)}>Details</button> },
   ];
 
   return (
     <>
       <PageHeader eyebrow="SAVINGS PLANS" title="SIP management" description="Configure SIP plans and track monthly installment payments, skips, and maturity dates." actions={<button className="button button-primary" onClick={() => { setFormError(''); setStartDate(todayDate()); setContributionDurationMonths('12'); setContributionAmountInput(''); setDurationMonths('12'); setAmountInput(''); setFormOpen(true); }}><Plus size={15} /> Create SIP</button>} />
       <SimulatedBanner>SIP plans and monthly installment statuses are stored in MySQL. The system does not initiate automatic debits.</SimulatedBanner>
+      {activeRoleId === 'SUPER_ADMIN' ? (
+        <section className="panel management-panel">
+          <PageHeader eyebrow="CUSTOMER SIP" title="SIP schemes" description="Manage the active schemes customers can enroll in from the mobile app." />
+          <form className="management-form" onSubmit={submitScheme}>
+            <div className="form-grid">
+              <label className="field-block"><span>Scheme name</span><input required maxLength={120} value={schemeDraft.name} onChange={(event) => setSchemeDraft((current) => ({ ...current, name: event.target.value }))} /></label>
+              <label className="field-block"><span>Metal</span><select required value={schemeDraft.productId} onChange={(event) => setSchemeDraft((current) => ({ ...current, productId: event.target.value }))}><option value="" disabled>Select a metal product</option>{products.filter((product) => product.status === 'Active').map((product) => <option key={product.id} value={product.id}>{product.metal} · {product.purity}</option>)}</select></label>
+              <label className="field-block"><span>Minimum investment (₹)</span><input required type="number" min="0.01" step="0.01" value={schemeDraft.minimumAmount} onChange={(event) => setSchemeDraft((current) => ({ ...current, minimumAmount: event.target.value }))} /></label>
+              <label className="field-block"><span>Investment frequency</span><select value={schemeDraft.frequency} onChange={(event) => setSchemeDraft((current) => ({ ...current, frequency: event.target.value }))}><option>Monthly</option><option>Weekly</option></select></label>
+              <label className="field-block"><span>Duration (months)</span><input required type="number" min="1" max="60" step="1" value={schemeDraft.durationMonths} onChange={(event) => setSchemeDraft((current) => ({ ...current, durationMonths: event.target.value }))} /></label>
+              <label className="field-block"><span>Scheme status</span><select value={schemeDraft.status} onChange={(event) => setSchemeDraft((current) => ({ ...current, status: event.target.value }))}><option>Active</option><option>Inactive</option></select></label>
+              <label className="field-block"><span>Charge type</span><select value={schemeDraft.chargeType} onChange={(event) => setSchemeDraft((current) => ({ ...current, chargeType: event.target.value }))}><option value="fixed">Fixed amount (₹)</option><option value="percentage">Percentage (%)</option></select></label>
+              <label className="field-block"><span>{schemeDraft.chargeType === 'fixed' ? 'Charge per installment (₹)' : 'Charge rate (%)'}</span><input required type="number" min="0" max={schemeDraft.chargeType === 'percentage' ? '100' : undefined} step="0.01" value={schemeDraft.chargeValue} onChange={(event) => setSchemeDraft((current) => ({ ...current, chargeValue: event.target.value }))} /></label>
+              <label className="field-block"><span>Tax on charges (%)</span><input required type="number" min="0" max="100" step="0.01" value={schemeDraft.taxRatePercent} onChange={(event) => setSchemeDraft((current) => ({ ...current, taxRatePercent: event.target.value }))} /></label>
+            </div>
+            {schemeError && <p className="form-feedback" role="alert">{schemeError}</p>}
+            <div className="form-actions"><button type="button" className="button button-secondary" disabled={schemeSaving} onClick={resetSchemeDraft}>{editingSchemeId ? 'Cancel edit' : 'Clear'}</button><button type="submit" className="button button-primary" disabled={schemeSaving}>{schemeSaving ? 'Saving…' : editingSchemeId ? 'Save scheme changes' : 'Create scheme'}</button></div>
+          </form>
+          <div className="sip-scheme-list">
+            {sipSchemes.map((scheme) => (
+              <article className="sip-scheme-admin-row" key={scheme.id}>
+                <div><strong>{scheme.name}</strong><small>{scheme.metal} · {scheme.frequency} · {scheme.durationMonths} months · minimum {formatCurrency(scheme.minimumAmount)}</small><small>{scheme.chargeType === 'percentage' ? `${scheme.chargeValue}%` : formatCurrency(scheme.chargeValue)} charge · ${(scheme.taxRateBps / 100).toFixed(2)}% tax</small></div>
+                <div className="table-row-actions"><StatusBadge status={scheme.status} /><button type="button" className="text-action" onClick={() => editScheme(scheme)}>Edit</button><button type="button" className="text-action" onClick={() => void updateSipScheme(scheme.id, { name: scheme.name, productId: scheme.productId, minimumAmount: scheme.minimumAmount, frequency: scheme.frequency, durationMonths: scheme.durationMonths, chargeType: scheme.chargeType, chargeValue: scheme.chargeValue, taxRateBps: scheme.taxRateBps, status: scheme.status === 'Active' ? 'Inactive' : 'Active' })}>{scheme.status === 'Active' ? 'Deactivate' : 'Activate'}</button></div>
+              </article>
+            ))}
+            {sipSchemes.length === 0 ? <p className="form-help">No schemes created yet.</p> : null}
+          </div>
+        </section>
+      ) : null}
       <section className="management-stat-grid">
         <article><span className="management-stat-icon stat-icon-teal"><CalendarClock size={17} /></span><div><span>Total SIP plans</span><strong>{sips.length}</strong></div></article>
         <article><span className="management-stat-icon stat-icon-blue"><CirclePlay size={17} /></span><div><span>Active plans</span><strong>{sips.filter((sip) => sip.status === 'Active').length}</strong></div></article>
@@ -205,7 +324,7 @@ export default function SipManagementPage() {
       <Modal open={formOpen} onClose={() => setFormOpen(false)} title="Create SIP" description="Configure a monthly investment plan and its installment schedule.">
         <form className="management-form" onSubmit={submitSip}>
           <div className="form-grid">
-            <label className="field-block form-grid-full"><span>Metal</span><select name="productId" required defaultValue=""><option value="" disabled>Select a metal</option>{products.filter((product) => product.status === 'Active').map((product) => <option key={product.id} value={product.id}>{product.metal} · {product.purity}</option>)}</select></label>
+            <label className="field-block form-grid-full"><span>Select Metal</span><select name="metal" required value={selectedSipMetal} onChange={(event) => { setSelectedSipMetal(event.target.value); setFormError(''); }}><option value="" disabled>Select a metal</option>{SIP_METALS.map((metal) => <option key={metal} value={metal}>{metal}</option>)}</select></label>
             <label className="field-block"><span>Shop owner monthly contribution (₹)</span><input name="contributionMonthlyAmount" type="number" min="0.01" step="0.01" required value={contributionAmountInput} onChange={(event) => setContributionAmountInput(event.target.value)} /></label>
             <label className="field-block"><span>Shop owner contribution duration (months)</span><input name="contributionDurationMonths" type="number" min="1" max="60" step="1" required value={contributionDurationMonths} onChange={(event) => setContributionDurationMonths(event.target.value)} /></label>
             <label className="field-block"><span>Customer monthly payment (₹)</span><input name="monthlyAmount" type="number" min="0.01" step="0.01" required value={amountInput} onChange={(event) => setAmountInput(event.target.value)} /></label>

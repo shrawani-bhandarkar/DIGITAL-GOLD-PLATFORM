@@ -29,6 +29,9 @@ import {
   fetchPortfolio,
   fetchProfile,
   fetchRates,
+  fetchSipSchemes,
+  fetchSips,
+  createSip,
   fetchTransactions,
   submitConfirmedPurchase,
 } from './src/services/customerServices';
@@ -537,14 +540,14 @@ function HomeScreen({
       </Text>
       {apiConfig.mode === 'backend' ? (
         <Notice type="warning" style={styles.sectionNotice}>
-          Sell, SIP, redemption and gift actions remain disabled until their backend transaction flow is connected.
+          Sell, redemption and gift actions are unavailable until their backend transaction flow is connected.
         </Notice>
       ) : null}
       <View style={[styles.actionsGrid, { columnGap, rowGap: 10 }]}>
         {actions.map((action) => {
           const requiresApprovedKyc = action.id === 'buy' || action.id === 'sip';
           const disabledForKyc = requiresApprovedKyc && !kycApproved;
-          const disabledForBackend = apiConfig.mode === 'backend' && action.id !== 'portfolio';
+          const disabledForBackend = apiConfig.mode === 'backend' && action.id !== 'portfolio' && action.id !== 'sip';
           return (
             <ExploreActionCard
               key={action.id}
@@ -1229,7 +1232,6 @@ function ActionScreen({
   const [recipient, setRecipient] = useState(initialOrder?.recipient || '');
   const [message, setMessage] = useState(initialOrder?.message || '');
   const [startDate, setStartDate] = useState(initialOrder?.startDate || '');
-  const [frequency, setFrequency] = useState(initialOrder?.frequency || 'monthly');
   const [error, setError] = useState('');
   const value = valuesByMode[mode];
   const setValue = (next) => {
@@ -1344,7 +1346,6 @@ function ActionScreen({
       recipient,
       message: message.trim(),
       startDate,
-      frequency,
       rate,
       estimate: action === 'sell' ? sellEstimate : buyEstimate,
     });
@@ -1485,12 +1486,6 @@ function ActionScreen({
             placeholder="e.g. 1,000"
             keyboardType="decimal-pad"
           />
-          <Text style={styles.formLabel}>Frequency</Text>
-          <ChoiceRow
-            options={[{ label: 'Monthly', value: 'monthly' }, { label: 'Weekly', value: 'weekly' }]}
-            value={frequency}
-            onChange={setFrequency}
-          />
           <Field
             label="Proposed start date"
             value={startDate}
@@ -1625,7 +1620,7 @@ function ReviewScreen({ order, onBack, onConfirm }) {
           />
         ) : order.action === 'sip' ? (
           <SummaryRow
-            label={`Demo investment amount (${order.frequency})`}
+            label="Demo monthly investment amount"
             value={`₹${Number(order.value).toLocaleString('en-IN')}`}
           />
         ) : null}
@@ -1635,10 +1630,7 @@ function ReviewScreen({ order, onBack, onConfirm }) {
           <SummaryRow label="Estimated quantity per installment" value={`${order.quantity.toFixed(6)} g`} />
         )}
         {order.action === 'sip' ? (
-          <>
-            <SummaryRow label="Frequency" value={order.frequency} />
-            <SummaryRow label="Proposed start date" value={order.startDate} />
-          </>
+          <SummaryRow label="Proposed start date" value={order.startDate} />
         ) : null}
         {order.action === 'gift' ? (
           <>
@@ -1878,7 +1870,7 @@ function TransactionDetails({ transaction }) {
         <SummaryRow label="Sample amount" value={formatINR(transaction.amount)} />
         {transaction.quantity > 0 ? <SummaryRow label="Sample quantity" value={`${transaction.quantity.toFixed(6)} g`} /> : null}
         <SummaryRow label="Created locally" value={timestamp} />
-        {transaction.frequency ? <SummaryRow label="Frequency" value={transaction.frequency} /> : null}
+        {transaction.frequency && transaction.type !== 'sip' ? <SummaryRow label="Frequency" value={transaction.frequency} /> : null}
         {transaction.startDate ? <SummaryRow label="Proposed start date" value={transaction.startDate} /> : null}
         {transaction.recipientName ? <SummaryRow label="Recipient" value={transaction.recipientName} /> : null}
         {transaction.recipient ? <SummaryRow label="Recipient mobile" value={`+91 ••••••${transaction.recipient.slice(-4)}`} /> : null}
@@ -2089,6 +2081,245 @@ function SummaryRow({ label, value, compact = false }) {
       <Text style={compact ? styles.quickBuySummaryLabel : styles.summaryLabel}>{label}</Text>
       <Text style={compact ? styles.quickBuySummaryValue : styles.summaryValue}>{value}</Text>
     </View>
+  );
+}
+
+function estimateSipInstallment(scheme, monthlyAmount) {
+  if (scheme.source !== 'scheme') {
+    return {
+      charge: Number(scheme.estimatedInstallmentCharge) || 0,
+      total: Number(scheme.estimatedInstallmentTotal) || 0,
+    };
+  }
+  const amount = Number(monthlyAmount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return {
+      charge: Number(scheme.estimatedInstallmentCharge) || 0,
+      total: Number(scheme.estimatedInstallmentTotal) || 0,
+    };
+  }
+  const charge = scheme.chargeType === 'percentage'
+    ? Math.round((amount * Number(scheme.chargeValue) + Number.EPSILON)) / 100
+    : Number(scheme.chargeValue) || 0;
+  const tax = Math.round((charge * Number(scheme.taxRateBps) / 100 + Number.EPSILON)) / 100;
+  return {
+    charge,
+    total: Math.round((amount + charge + tax + Number.EPSILON) * 100) / 100,
+  };
+}
+
+function SipSchemesScreen({ kycApproved }) {
+  const [schemes, setSchemes] = useState([]);
+  const [enrollments, setEnrollments] = useState([]);
+  const [schemeInputs, setSchemeInputs] = useState({});
+  const [acceptedTerms, setAcceptedTerms] = useState({});
+  const [schemeErrors, setSchemeErrors] = useState({});
+  const [schemesLoading, setSchemesLoading] = useState(true);
+  const [enrollmentsLoading, setEnrollmentsLoading] = useState(true);
+  const [submittingSchemeId, setSubmittingSchemeId] = useState('');
+  const [schemesError, setSchemesError] = useState('');
+  const [enrollmentsError, setEnrollmentsError] = useState('');
+
+  const refresh = useCallback(async () => {
+    setSchemesLoading(true);
+    setEnrollmentsLoading(true);
+    setSchemesError('');
+    setEnrollmentsError('');
+    const [schemeResult, enrollmentResult] = await Promise.allSettled([fetchSipSchemes(), fetchSips()]);
+    if (schemeResult.status === 'fulfilled') {
+      if (Array.isArray(schemeResult.value?.schemes)) {
+        setSchemes(schemeResult.value.schemes);
+      } else {
+        setSchemesError('The SIP service returned an invalid schemes response.');
+      }
+    } else {
+      setSchemesError(schemeResult.reason?.message || 'Could not load SIP schemes.');
+    }
+    if (enrollmentResult.status === 'fulfilled') {
+      if (Array.isArray(enrollmentResult.value?.enrollments)) {
+        setEnrollments(enrollmentResult.value.enrollments);
+      } else {
+        setEnrollmentsError('The SIP service returned an invalid enrollment history response.');
+      }
+    } else {
+      setEnrollmentsError(enrollmentResult.reason?.message || 'Could not load SIP investment history.');
+    }
+    setSchemesLoading(false);
+    setEnrollmentsLoading(false);
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const enroll = async (scheme) => {
+    if (!kycApproved) {
+      Alert.alert('KYC approval required', KYC_RESTRICTION_MESSAGE);
+      return;
+    }
+    if (!acceptedTerms[scheme.id] || submittingSchemeId) return;
+    const input = schemeInputs[scheme.id] ?? {
+      amount: String(scheme.minimumAmount),
+      duration: String(scheme.durationMonths),
+    };
+    const nextErrors = {};
+    if (scheme.source === 'scheme') {
+      const amountText = String(input.amount ?? '').trim();
+      const monthlyAmount = Number(amountText);
+      if (!/^\d{1,9}(?:\.\d{1,2})?$/.test(amountText) || !Number.isFinite(monthlyAmount)
+        || monthlyAmount < Number(scheme.minimumAmount)) {
+        nextErrors.amount = `Enter at least ${formatINR(scheme.minimumAmount)} per month.`;
+      }
+      const durationText = String(input.duration ?? '').trim();
+      const durationMonths = Number(durationText);
+      if (!/^\d+$/.test(durationText) || !Number.isInteger(durationMonths)
+        || durationMonths < 1 || durationMonths > 60) {
+        nextErrors.duration = 'Enter a total duration from 1 to 60 months.';
+      }
+    }
+    if (Object.keys(nextErrors).length) {
+      setSchemeErrors((current) => ({ ...current, [scheme.id]: nextErrors }));
+      return;
+    }
+    setSubmittingSchemeId(scheme.id);
+    setSchemeErrors((current) => ({ ...current, [scheme.id]: {} }));
+    try {
+      const result = await createSip({
+        schemeId: scheme.id,
+        source: scheme.source,
+        termsAccepted: true,
+        ...(scheme.source === 'scheme' ? {
+          monthlyAmount: Number(input.amount),
+          durationMonths: Number(input.duration),
+        } : {}),
+      });
+      if (!result?.enrollment) throw new Error('The SIP enrollment response was incomplete.');
+      setEnrollments((current) => [result.enrollment, ...current.filter((item) => item.id !== result.enrollment.id)]);
+      Alert.alert('SIP started', 'Your SIP enrollment has been saved.');
+    } catch (enrollError) {
+      setSchemeErrors((current) => ({
+        ...current,
+        [scheme.id]: { form: enrollError.message || 'Could not start this SIP.' },
+      }));
+    } finally {
+      setSubmittingSchemeId('');
+    }
+  };
+
+  return (
+    <>
+      <Text style={styles.actionPageDescription}>Choose an active scheme and review its investment schedule and charges.</Text>
+      {!kycApproved ? <Notice type="warning" style={styles.sectionNotice}>{KYC_RESTRICTION_MESSAGE}</Notice> : null}
+      {schemesLoading ? <LoadingState label="Loading active SIP schemes…" /> : null}
+      {!schemesLoading && schemesError ? <ErrorState message={schemesError} onRetry={refresh} /> : null}
+      {!schemesLoading && !schemesError && schemes.length === 0 ? (
+        <EmptyState title="No active SIP schemes" body="Active schemes will appear here when available." symbol="↻" />
+      ) : null}
+      {!schemesLoading && !schemesError && schemes.map((scheme) => {
+        const inputs = schemeInputs[scheme.id] ?? {
+          amount: String(scheme.minimumAmount),
+          duration: String(scheme.durationMonths),
+        };
+        const estimate = estimateSipInstallment(scheme, inputs.amount);
+        return (
+          <Card key={scheme.id} style={styles.sipSchemeCard}>
+            <View style={styles.sipSchemeHeading}>
+              <Text style={styles.sipSchemeName}>{scheme.name}</Text>
+              <StatusBadge status={scheme.metal} />
+            </View>
+            <SummaryRow label="Metal" value={`${scheme.metal} · ${scheme.purity}`} />
+            <SummaryRow label="Duration" value={`${scheme.source === 'scheme' ? inputs.duration : scheme.durationMonths} months`} />
+            <SummaryRow label="Charge per installment" value={`${formatINR(estimate.charge)}${scheme.chargeType === 'percentage' ? ` (${scheme.chargeValue}%)` : ''}`} />
+            <SummaryRow label="Estimated installment total" value={formatINR(estimate.total)} />
+            {scheme.source === 'scheme' ? (
+              <>
+                <Field
+                  label="Monthly investment amount (₹)"
+                  value={inputs.amount}
+                  onChangeText={(amount) => {
+                    setSchemeInputs((current) => ({
+                      ...current,
+                      [scheme.id]: {
+                        amount,
+                        duration: current[scheme.id]?.duration ?? String(scheme.durationMonths),
+                      },
+                    }));
+                    setSchemeErrors((current) => ({ ...current, [scheme.id]: {} }));
+                  }}
+                  placeholder={`Minimum ${formatINR(scheme.minimumAmount)}`}
+                  keyboardType="decimal-pad"
+                  error={schemeErrors[scheme.id]?.amount}
+                />
+                <Field
+                  label="Total duration (months)"
+                  value={inputs.duration}
+                  onChangeText={(duration) => {
+                    setSchemeInputs((current) => ({
+                      ...current,
+                      [scheme.id]: {
+                        amount: current[scheme.id]?.amount ?? String(scheme.minimumAmount),
+                        duration,
+                      },
+                    }));
+                    setSchemeErrors((current) => ({ ...current, [scheme.id]: {} }));
+                  }}
+                  placeholder="1–60 months"
+                  keyboardType="number-pad"
+                  error={schemeErrors[scheme.id]?.duration}
+                />
+              </>
+            ) : null}
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: Boolean(acceptedTerms[scheme.id]) }}
+              onPress={() => setAcceptedTerms((current) => ({ ...current, [scheme.id]: !current[scheme.id] }))}
+              style={styles.sipTermsRow}
+            >
+              <Text style={styles.sipTermsCheck}>{acceptedTerms[scheme.id] ? '☑' : '□'}</Text>
+              <Text style={styles.sipTermsText}>
+                I understand each SIP contribution is non-refundable and metal can only be purchased through SIP.
+              </Text>
+            </Pressable>
+            {schemeErrors[scheme.id]?.form ? <Text style={styles.formError}>{schemeErrors[scheme.id].form}</Text> : null}
+            <Button
+              title="Start SIP"
+              loading={submittingSchemeId === scheme.id}
+              disabled={!kycApproved || !acceptedTerms[scheme.id] || Boolean(submittingSchemeId)}
+              onPress={() => { void enroll(scheme); }}
+            />
+          </Card>
+        );
+      })}
+      <SectionTitle title="My SIPs and investment history" />
+      {enrollmentsLoading ? <LoadingState label="Loading your SIP history…" /> : null}
+      {!enrollmentsLoading && enrollmentsError ? <ErrorState message={enrollmentsError} onRetry={refresh} /> : null}
+      {!enrollmentsLoading && !enrollmentsError && enrollments.length === 0 ? (
+        <EmptyState title="No SIP enrollments yet" body="Your active SIPs and installment history will appear here." symbol="↻" />
+      ) : null}
+      {!enrollmentsLoading && !enrollmentsError && enrollments.map((enrollment) => (
+        <Card key={enrollment.id} style={styles.sipHistoryCard}>
+          <View style={styles.sipSchemeHeading}>
+            <Text style={styles.sipSchemeName}>{enrollment.schemeName}</Text>
+            <StatusBadge status={enrollment.status} />
+          </View>
+          <SummaryRow label="Metal" value={enrollment.metal} />
+          <SummaryRow label="Duration" value={`${enrollment.durationMonths} months`} />
+          <SummaryRow label="Installment" value={`${formatINR(enrollment.installmentAmount)} × ${enrollment.installmentCount}`} />
+          <SummaryRow
+            label={enrollment.source === 'admin-plan' ? 'Total plan investment' : 'Total incl. charges'}
+            value={formatINR(enrollment.totalInvestment)}
+          />
+          <SummaryRow label="Next due date" value={enrollment.nextDueDate || 'No pending installments'} />
+          <SummaryRow label="Maturity date" value={enrollment.maturityDate} />
+          {(enrollment.installments || []).map((installment) => (
+            <View key={`${enrollment.id}-${installment.number}`} style={styles.sipInstallmentRow}>
+              <Text style={styles.sipInstallmentText}>
+                Installment {installment.number} · {installment.dueDate} · {formatINR(installment.amount)}
+              </Text>
+              <StatusBadge status={installment.status} />
+            </View>
+          ))}
+        </Card>
+      ))}
+    </>
   );
 }
 
@@ -2318,7 +2549,7 @@ export default function App() {
       }
       if (screen === 'transaction') setTab('activity');
       if (screen === 'profileDetail') setTab('account');
-      if (screen === 'statements' || screen === 'metalDetails' || screen === 'action' || screen === 'result') {
+      if (screen === 'statements' || screen === 'metalDetails' || screen === 'action' || screen === 'sip' || screen === 'result') {
         setTab('home');
       }
       setScreen('app');
@@ -2429,6 +2660,10 @@ export default function App() {
       Alert.alert('KYC approval required', KYC_RESTRICTION_MESSAGE);
       return;
     }
+    if (nextAction === 'sip' && apiConfig.mode === 'backend') {
+      setScreen('sip');
+      return;
+    }
     confirmationStarted.current = false;
     setAction(nextAction);
     setActionDraft(draft);
@@ -2516,6 +2751,8 @@ export default function App() {
       ? (action === 'buy'
         ? `Buy ${draftBuyMetal}`
         : ({ sell: 'Sell Metal', redeem: 'Redeem Metal', sip: 'Start SIP', gift: 'Gift Gold' }[action] || 'DigiGold'))
+      : screen === 'sip'
+        ? 'Start a SIP'
       : screen === 'review'
         ? 'Review Transaction'
         : screen === 'result'
@@ -2656,6 +2893,11 @@ export default function App() {
                 ? (metalId) => openAction('buy', { metal: metalId, mode: 'amount', value: '' })
                 : undefined}
             />
+          </ScrollView>
+        ) : screen === 'sip' ? (
+          <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
+            <DigiGoldHeader title={headerTitle} onNotifications={onOpenNotifications} onSupport={onOpenHelp} />
+            <SipSchemesScreen kycApproved={kycApproved} />
           </ScrollView>
         ) : screen === 'profileDetail' ? (
           <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
@@ -3058,6 +3300,17 @@ const styles = StyleSheet.create({
   pageTitle: { color: colors.text, fontSize: 24, fontWeight: '900', marginBottom: 8 },
   screenDescription: { color: colors.muted, fontSize: 12, lineHeight: 18, marginBottom: 14 },
   actionPageDescription: { color: colors.muted, fontSize: 12, lineHeight: 18, marginBottom: 14, marginTop: -3 },
+  sipSchemeCard: { borderColor: colors.border, borderWidth: 1, marginBottom: 11 },
+  sipSchemeSelected: { borderColor: colors.primary, borderWidth: 2 },
+  sipSchemeHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  sipSchemeName: { color: colors.text, flex: 1, fontSize: 16, fontWeight: '800', marginRight: 8 },
+  sipTermsCard: { marginBottom: 20 },
+  sipTermsRow: { alignItems: 'flex-start', flexDirection: 'row', marginBottom: 14 },
+  sipTermsCheck: { color: colors.primary, fontSize: 20, fontWeight: '800', marginRight: 10 },
+  sipTermsText: { color: colors.text, flex: 1, fontSize: 12, lineHeight: 19 },
+  sipHistoryCard: { marginBottom: 12 },
+  sipInstallmentRow: { alignItems: 'center', borderTopColor: colors.border, borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', marginTop: 9, paddingTop: 9 },
+  sipInstallmentText: { color: colors.muted, flex: 1, fontSize: 11, marginRight: 7 },
   sectionNotice: { marginBottom: 16 },
   investedCard: { marginBottom: 24, paddingHorizontal: 15, paddingVertical: 4 },
   summaryRow: { alignItems: 'flex-start', flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 11 },

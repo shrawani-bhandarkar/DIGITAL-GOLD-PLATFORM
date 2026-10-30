@@ -8,6 +8,7 @@ import { calculateOrderAmounts, calculateRedemptionAmounts } from "./financial";
 import { mapMetalProduct } from "./product-data";
 import { validateNewCustomer } from "./customer-validation";
 import { decryptKycDocument, encryptKycDocument, validateKycDocument } from "../customer-auth/kyc";
+import { addSipMonths as addSipCalendarMonths } from "../sip/schedule";
 
 const router = Router();
 router.use(requireAdmin);
@@ -119,6 +120,15 @@ function requirePermission(permission: string) {
   };
 }
 
+function requireSuperAdmin(request: Request, response: Response, next: NextFunction): void {
+  const actor = (request as AuthenticatedRequest).admin;
+  if (actor.roleId !== "SUPER_ADMIN") {
+    response.status(403).json({ message: "Only Super Admin can manage SIP schemes." });
+    return;
+  }
+  next();
+}
+
 interface JsonRow extends RowDataPacket {
   record_data: unknown;
 }
@@ -162,12 +172,7 @@ function userIdFromCustomerId(customerId: unknown): number {
 }
 
 function addSipMonths(date: string, months: number): string {
-  const [year, month, day] = date.split("-").map(Number);
-  const targetMonth = month - 1 + months;
-  const targetYear = year + Math.floor(targetMonth / 12);
-  const monthIndex = targetMonth % 12;
-  const lastDay = new Date(Date.UTC(targetYear, monthIndex + 1, 0)).getUTCDate();
-  return new Date(Date.UTC(targetYear, monthIndex, Math.min(day, lastDay))).toISOString().slice(0, 10);
+  return addSipCalendarMonths(date, months);
 }
 
 function sipRecord(row: RowDataPacket): Record<string, unknown> {
@@ -193,6 +198,127 @@ function sipRecord(row: RowDataPacket): Record<string, unknown> {
     skippedCount: Number(row.skipped_count ?? 0),
     status: row.status,
     createdAt: row.created_at,
+  };
+}
+
+function customerSchemeSipRecord(row: RowDataPacket): Record<string, unknown> {
+  return {
+    id: row.id,
+    customerId: `CUS-${row.customer_user_id}`,
+    customer: row.customer_name,
+    productId: row.product_id,
+    metal: row.metal,
+    purity: row.purity,
+    monthlyContribution: null,
+    contributionDurationMonths: null,
+    totalShopOwnerContribution: null,
+    amount: Number(row.monthly_amount),
+    durationMonths: Number(row.duration_months),
+    totalCustomerPayments: Number(row.total_customer_payments),
+    totalInvestment: Number(row.total_investment),
+    startDate: row.start_date,
+    maturityDate: row.maturity_date,
+    nextDebit: row.next_due_date,
+    paidCount: Number(row.paid_count ?? 0),
+    pendingCount: Number(row.pending_count ?? 0),
+    skippedCount: Number(row.skipped_count ?? 0),
+    status: row.status,
+    createdAt: row.created_at,
+    source: "customer-scheme",
+    schemeId: row.scheme_id,
+    schemeName: row.scheme_name,
+  };
+}
+
+function sipSchemeRecord(row: RowDataPacket): Record<string, unknown> {
+  return {
+    id: row.scheme_id,
+    name: row.scheme_name,
+    productId: row.product_id,
+    metal: row.metal,
+    purity: row.purity,
+    minimumAmount: Number(row.minimum_amount),
+    frequency: row.frequency,
+    durationMonths: Number(row.duration_months),
+    chargeType: row.charge_type,
+    chargeValue: Number(row.charge_value),
+    taxRateBps: Number(row.tax_rate_bps),
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+interface SipSchemeInput {
+  name: string;
+  productId: string;
+  minimumAmount: string;
+  frequency: "Monthly" | "Weekly";
+  durationMonths: number;
+  chargeType: "fixed" | "percentage";
+  chargeValue: string;
+  taxRateBps: number;
+  status: "Active" | "Inactive";
+}
+
+function sipSchemeInput(data: Record<string, unknown>): SipSchemeInput {
+  const allowedFields = [
+    "name", "productId", "minimumAmount", "frequency", "durationMonths",
+    "chargeType", "chargeValue", "taxRateBps", "status",
+  ];
+  if (Object.keys(data).some((key) => !allowedFields.includes(key))) {
+    throw new Error("Provide only supported SIP scheme details.");
+  }
+  const name = requiredString(data.name, "Scheme name");
+  if (name.length > 120) throw new Error("Scheme name cannot exceed 120 characters.");
+  const productId = requiredString(data.productId, "Metal");
+  const minimumAmountText = typeof data.minimumAmount === "number" && Number.isFinite(data.minimumAmount)
+    ? String(data.minimumAmount)
+    : typeof data.minimumAmount === "string" ? data.minimumAmount.trim() : "";
+  if (!/^\d{1,9}(?:\.\d{1,2})?$/.test(minimumAmountText) || Number(minimumAmountText) <= 0) {
+    throw new Error("Minimum investment must be a positive rupee amount with up to two decimals.");
+  }
+  const [minimumWhole, minimumFraction = ""] = minimumAmountText.split(".");
+  const frequency = data.frequency;
+  if (frequency !== "Monthly" && frequency !== "Weekly") {
+    throw new Error("Choose Monthly or Weekly investment frequency.");
+  }
+  const durationMonths = Number(data.durationMonths);
+  if (!Number.isInteger(durationMonths) || durationMonths < 1 || durationMonths > 60) {
+    throw new Error("SIP duration must be between 1 and 60 months.");
+  }
+  const chargeType = data.chargeType;
+  if (chargeType !== "fixed" && chargeType !== "percentage") {
+    throw new Error("Choose a supported SIP charge type.");
+  }
+  const chargeValueText = typeof data.chargeValue === "number" && Number.isFinite(data.chargeValue)
+    ? String(data.chargeValue)
+    : typeof data.chargeValue === "string" ? data.chargeValue.trim() : "";
+  if (!/^\d{1,9}(?:\.\d{1,2})?$/.test(chargeValueText)) {
+    throw new Error("SIP charge must be a non-negative rupee amount or percentage with up to two decimals.");
+  }
+  if (chargeType === "percentage" && Number(chargeValueText) > 100) {
+    throw new Error("SIP percentage charge cannot exceed 100%.");
+  }
+  const [chargeWhole, chargeFraction = ""] = chargeValueText.split(".");
+  const taxRateBps = Number(data.taxRateBps);
+  if (!Number.isInteger(taxRateBps) || taxRateBps < 0 || taxRateBps > 10_000) {
+    throw new Error("Tax rate must be whole basis points from 0 to 10,000.");
+  }
+  const status = data.status ?? "Active";
+  if (status !== "Active" && status !== "Inactive") {
+    throw new Error("Choose Active or Inactive scheme status.");
+  }
+  return {
+    name,
+    productId,
+    minimumAmount: `${minimumWhole}.${minimumFraction.padEnd(2, "0")}`,
+    frequency,
+    durationMonths,
+    chargeType,
+    chargeValue: `${chargeWhole}.${chargeFraction.padEnd(2, "0")}`,
+    taxRateBps,
+    status,
   };
 }
 
@@ -266,6 +392,20 @@ function sipRequestError(response: Response, error: unknown): void {
     return;
   }
   response.status(400).json({ message: error instanceof Error ? error.message : "SIP request is invalid." });
+}
+
+function sipSchemeRequestError(response: Response, error: unknown): void {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = String(error.code);
+    if (code === "ER_DUP_ENTRY") {
+      response.status(409).json({ message: "A SIP scheme with these details already exists." });
+      return;
+    }
+    console.error("SIP scheme database operation failed:", error);
+    response.status(500).json({ message: "Could not save SIP scheme details." });
+    return;
+  }
+  response.status(400).json({ message: error instanceof Error ? error.message : "SIP scheme request is invalid." });
 }
 
 function requiredString(value: unknown, label: string): string {
@@ -398,6 +538,38 @@ router.get("/state", async (request, response) => {
        ) i ON i.sip_id = p.sip_id
        ORDER BY p.created_at DESC, p.sip_id DESC`,
     );
+    const [customerSchemeSips] = await database.execute<RowDataPacket[]>(
+      `SELECT e.enrollment_id AS id, e.customer_user_id, u.full_name AS customer_name,
+              e.scheme_id, e.scheme_name, e.product_id, m.metal, m.purity,
+              e.installment_amount AS monthly_amount, e.duration_months,
+              e.total_customer_payments, e.total_investment,
+              DATE_FORMAT(e.start_date, '%Y-%m-%d') AS start_date,
+              DATE_FORMAT(e.maturity_date, '%Y-%m-%d') AS maturity_date,
+              DATE_FORMAT(e.next_due_date, '%Y-%m-%d') AS next_due_date,
+              e.status, e.created_at,
+              COALESCE(i.paid_count, 0) AS paid_count,
+              COALESCE(i.pending_count, 0) AS pending_count,
+              COALESCE(i.skipped_count, 0) AS skipped_count
+       FROM customer_sip_enrollments e
+       INNER JOIN users u ON u.user_id = e.customer_user_id
+       INNER JOIN admin_metal_products m ON m.product_id = e.product_id
+       LEFT JOIN (
+         SELECT enrollment_id,
+                SUM(payment_status = 'PAID') AS paid_count,
+                SUM(payment_status = 'PENDING') AS pending_count,
+                SUM(payment_status = 'SKIPPED') AS skipped_count
+         FROM customer_sip_enrollment_installments GROUP BY enrollment_id
+       ) i ON i.enrollment_id = e.enrollment_id
+       ORDER BY e.created_at DESC, e.enrollment_id DESC`,
+    );
+    const [sipSchemes] = await database.execute<RowDataPacket[]>(
+      `SELECT s.scheme_id, s.scheme_name, s.product_id, p.metal, p.purity,
+              s.minimum_amount, s.frequency, s.duration_months, s.charge_type,
+              s.charge_value, s.tax_rate_bps, s.status, s.created_at, s.updated_at
+       FROM sip_schemes s
+       INNER JOIN admin_metal_products p ON p.product_id = s.product_id
+       ORDER BY s.created_at DESC, s.scheme_id DESC`,
+    );
     const [redemptions] = await database.execute<JsonRow[]>("SELECT redemption_data AS record_data FROM admin_redemptions ORDER BY requested_at DESC");
     const [gifts] = await database.execute<JsonRow[]>("SELECT gift_data AS record_data FROM admin_gifts ORDER BY created_at DESC");
     const [payments] = await database.execute<JsonRow[]>("SELECT payment_data AS record_data FROM admin_payments ORDER BY created_at DESC");
@@ -438,7 +610,10 @@ router.get("/state", async (request, response) => {
         }
         : null,
       orders: (permissions.orders || permissions.reports ? orders : []).map((row) => parseJson(row.record_data)),
-      sips: (permissions.orders ? sips : []).map(sipRecord),
+      sips: permissions.orders
+        ? [...sips.map(sipRecord), ...customerSchemeSips.map(customerSchemeSipRecord)]
+        : [],
+      sipSchemes: actor.roleId === "SUPER_ADMIN" ? sipSchemes.map(sipSchemeRecord) : [],
       redemptions: (permissions.fulfillment ? redemptions : []).map((row) => parseJson(row.record_data)),
       gifts: (permissions.fulfillment ? gifts : []).map((row) => parseJson(row.record_data)),
       payments: (permissions.finance || permissions.reports ? payments : []).map((row) => parseJson(row.record_data)),
@@ -987,6 +1162,86 @@ router.post("/orders", requirePermission("orders"), async (request, response) =>
 });
 
 router.patch("/orders/:orderId", requirePermission("orders"), async (request, response) => updateTimelineRecord(response, "admin_orders", "order_id", "order_data", "Order", String(request.params.orderId), request.body.status));
+router.post("/sip-schemes", requireSuperAdmin, async (request, response) => {
+  try {
+    if (!request.body || typeof request.body !== "object" || Array.isArray(request.body)) {
+      throw new Error("Provide SIP scheme details.");
+    }
+    const scheme = sipSchemeInput(request.body as Record<string, unknown>);
+    const [products] = await database.execute<RowDataPacket[]>(
+      "SELECT product_id FROM admin_metal_products WHERE product_id = ? AND UPPER(TRIM(status)) = 'ACTIVE' LIMIT 1",
+      [scheme.productId],
+    );
+    if (!products[0]) throw new Error("Choose an active metal product.");
+    const schemeId = `SIP-SCH-${randomUUID().toUpperCase()}`;
+    const [result] = await database.execute<ResultSetHeader>(
+      `INSERT INTO sip_schemes
+         (scheme_id, scheme_name, product_id, minimum_amount, frequency, duration_months,
+          charge_type, charge_value, tax_rate_bps, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [schemeId, scheme.name, scheme.productId, scheme.minimumAmount, scheme.frequency,
+        scheme.durationMonths, scheme.chargeType, scheme.chargeValue, scheme.taxRateBps, scheme.status],
+    );
+    if (result.affectedRows !== 1) throw new Error("SIP scheme was not created.");
+    const [rows] = await database.execute<RowDataPacket[]>(
+      `SELECT s.scheme_id, s.scheme_name, s.product_id, p.metal, p.purity,
+              s.minimum_amount, s.frequency, s.duration_months, s.charge_type,
+              s.charge_value, s.tax_rate_bps, s.status, s.created_at, s.updated_at
+       FROM sip_schemes s INNER JOIN admin_metal_products p ON p.product_id = s.product_id
+       WHERE s.scheme_id = ? LIMIT 1`,
+      [schemeId],
+    );
+    if (!rows[0]) throw new Error("Created SIP scheme could not be reloaded.");
+    response.status(201).json(sipSchemeRecord(rows[0]));
+  } catch (error) {
+    sipSchemeRequestError(response, error);
+  }
+});
+
+router.put("/sip-schemes/:schemeId", requireSuperAdmin, async (request, response) => {
+  try {
+    if (!request.body || typeof request.body !== "object" || Array.isArray(request.body)) {
+      throw new Error("Provide SIP scheme details.");
+    }
+    const scheme = sipSchemeInput(request.body as Record<string, unknown>);
+    const productStatusFilter = scheme.status === "Active" ? " AND UPPER(TRIM(status)) = 'ACTIVE'" : "";
+    const [products] = await database.execute<RowDataPacket[]>(
+      `SELECT product_id FROM admin_metal_products WHERE product_id = ?${productStatusFilter} LIMIT 1`,
+      [scheme.productId],
+    );
+    if (!products[0]) {
+      throw new Error(scheme.status === "Active" ? "Choose an active metal product." : "Choose an existing metal product.");
+    }
+    const [result] = await database.execute<ResultSetHeader>(
+      `UPDATE sip_schemes
+       SET scheme_name = ?, product_id = ?, minimum_amount = ?, frequency = ?,
+           duration_months = ?, charge_type = ?, charge_value = ?, tax_rate_bps = ?, status = ?
+       WHERE scheme_id = ?`,
+      [scheme.name, scheme.productId, scheme.minimumAmount, scheme.frequency, scheme.durationMonths,
+        scheme.chargeType, scheme.chargeValue, scheme.taxRateBps, scheme.status, request.params.schemeId],
+    );
+    if (result.affectedRows === 0) {
+      const [existing] = await database.execute<RowDataPacket[]>(
+        "SELECT scheme_id FROM sip_schemes WHERE scheme_id = ? LIMIT 1",
+        [request.params.schemeId],
+      );
+      if (!existing[0]) { response.status(404).json({ message: "SIP scheme was not found." }); return; }
+    }
+    const [rows] = await database.execute<RowDataPacket[]>(
+      `SELECT s.scheme_id, s.scheme_name, s.product_id, p.metal, p.purity,
+              s.minimum_amount, s.frequency, s.duration_months, s.charge_type,
+              s.charge_value, s.tax_rate_bps, s.status, s.created_at, s.updated_at
+       FROM sip_schemes s INNER JOIN admin_metal_products p ON p.product_id = s.product_id
+       WHERE s.scheme_id = ? LIMIT 1`,
+      [request.params.schemeId],
+    );
+    if (!rows[0]) throw new Error("Updated SIP scheme could not be reloaded.");
+    response.json(sipSchemeRecord(rows[0]));
+  } catch (error) {
+    sipSchemeRequestError(response, error);
+  }
+});
+
 router.get("/sips/:sipId", requirePermission("orders"), async (request, response) => {
   try {
     const sipId = requiredString(request.params.sipId, "SIP plan");

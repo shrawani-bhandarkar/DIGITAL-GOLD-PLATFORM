@@ -30,6 +30,7 @@ export function OperationsProvider() {
   const { recordAudit, setPersistenceError, consoleState } = useAdmin();
   const [orders, setOrders] = useState([]);
   const [sips, setSips] = useState([]);
+  const [sipSchemes, setSipSchemes] = useState([]);
   const [redemptions, setRedemptions] = useState([]);
   const [gifts, setGifts] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -40,6 +41,7 @@ export function OperationsProvider() {
     if (!consoleState) return;
     setOrders(consoleState.orders ?? []);
     setSips(consoleState.sips ?? []);
+    setSipSchemes(consoleState.sipSchemes ?? []);
     setRedemptions(consoleState.redemptions ?? []);
     setGifts(consoleState.gifts ?? []);
     setPayments(consoleState.payments ?? []);
@@ -61,6 +63,7 @@ export function OperationsProvider() {
   const value = useMemo(() => ({
     orders,
     sips,
+    sipSchemes,
     redemptions,
     gifts,
     payments,
@@ -115,6 +118,20 @@ export function OperationsProvider() {
         target: id,
         detail: action === 'paid' ? 'Monthly installment marked paid.' : 'Monthly installment marked skipped and schedule extended.',
       });
+      return saved;
+    },
+    createSipScheme: async (scheme) => {
+      const saved = await persist('/api/admin/console/sip-schemes', { method: 'POST', body: scheme });
+      if (!saved) return false;
+      setSipSchemes((items) => [saved, ...items]);
+      recordAudit({ action: 'Created SIP scheme', category: 'SIP schemes', target: saved.id, detail: 'Customer SIP scheme persisted in MySQL.' });
+      return saved;
+    },
+    updateSipScheme: async (id, scheme) => {
+      const saved = await persist(`/api/admin/console/sip-schemes/${encodeURIComponent(id)}`, { method: 'PUT', body: scheme });
+      if (!saved) return false;
+      setSipSchemes((items) => items.map((item) => item.id === id ? saved : item));
+      recordAudit({ action: `Updated SIP scheme ${saved.status.toLowerCase()}`, category: 'SIP schemes', target: id, detail: 'Customer SIP scheme settings persisted in MySQL.' });
       return saved;
     },
     updateRedemption: async (id, status) => {
@@ -180,7 +197,7 @@ export function OperationsProvider() {
       recordAudit({ action: 'Marked settlement mismatch reviewed', category: 'Reconciliation', target: id, detail: 'Settlement review status persisted.' });
       return true;
     },
-  }), [orders, sips, redemptions, gifts, payments, refunds, settlements, recordAudit, setPersistenceError]);
+  }), [orders, sips, sipSchemes, redemptions, gifts, payments, refunds, settlements, recordAudit, setPersistenceError]);
 
   return <OperationsContext.Provider value={value}><Outlet /></OperationsContext.Provider>;
 }
